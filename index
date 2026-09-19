@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Celestial Railway</title>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; }
+        #canvas-container { width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        /* Loading Screen */
+        #loading-screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(135deg, #1a2a3a 0%, #0d151c 100%); z-index: 100; display: flex; flex-direction: column; justify-content: center; align-items: center; color: #f5eedc; transition: opacity 2s ease-out; }
+        .title { font-size: 4rem; font-weight: 300; letter-spacing: 8px; margin-bottom: 10px; text-shadow: 0 0 20px rgba(255, 230, 150, 0.5); text-align: center; }
+        .subtitle { font-size: 1.2rem; font-weight: 300; letter-spacing: 4px; opacity: 0.7; margin-bottom: 50px; text-align: center; }
+        #start-btn { padding: 15px 40px; font-size: 1.2rem; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.3); color: #fff; cursor: pointer; border-radius: 4px; transition: all 0.3s; letter-spacing: 2px; }
+        #start-btn:hover { background: rgba(255, 255, 255, 0.2); box-shadow: 0 0 15px rgba(255,255,255,0.2); }
+        .loading-text { font-size: 1rem; opacity: 0.5; margin-top: 20px; }
+
+        /* UI Overlay */
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; display: none; }
+        .panel { background: rgba(15, 20, 25, 0.65); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 15px; color: #e0e6ed; pointer-events: auto; }
+        
+        #telemetry { position: absolute; top: 20px; left: 20px; width: 250px; }
+        .tel-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.9rem; }
+        .tel-label { opacity: 0.6; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; }
+        .tel-val { font-weight: 600; color: #fff; }
+        .signal-indicator { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: gray; box-shadow: 0 0 5px #000; }
+
+        #controls { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; }
+        .btn { background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; transition: 0.2s; display: flex; flex-direction: column; align-items: center; min-width: 70px;}
+        .btn:hover { background: rgba(255, 255, 255, 0.25); }
+        .btn:active { background: rgba(255, 255, 255, 0.4); }
+        .btn-label { font-size: 0.65rem; opacity: 0.6; margin-top: 4px; text-transform: uppercase; }
+        #horn-btn { background: rgba(180, 50, 50, 0.4); border-color: rgba(255, 100, 100, 0.5); }
+        #horn-btn:hover { background: rgba(220, 60, 60, 0.6); }
+
+        #map-panel { position: absolute; top: 20px; right: 20px; width: 200px; height: 200px; padding: 5px; }
+        #map-canvas { width: 100%; height: 100%; background: rgba(0,0,0,0.4); border-radius: 4px; }
+        
+        #weather-time { position: absolute; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 5px; }
+        .wt-btn { background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(255,255,255,0.1); color: #aaa; padding: 5px 10px; cursor: pointer; border-radius: 4px; font-size: 0.8rem; text-align: right;}
+        .wt-btn:hover { color: #fff; background: rgba(255,255,255,0.1); }
+
+        .cam-active { background: rgba(100, 200, 255, 0.3) !important; border-color: rgba(100, 200, 255, 0.6) !important; }
+
+        #cinematic-bars { position: absolute; width: 100%; height: 100%; pointer-events: none; z-index: 5; display: flex; flex-direction: column; justify-content: space-between; }
+        .bar { height: 0%; background: #000; transition: height 2s ease-in-out; }
+        .cinema-mode .bar { height: 12%; }
+        
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 4px; height: 4px; background: rgba(255,255,255,0.5); border-radius: 50%; transform: translate(-50%, -50%); display: none; pointer-events: none; z-index: 10;}
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    
+    <div id="loading-screen">
+        <div class="title">THE CELESTIAL RAILWAY</div>
+        <div class="subtitle">Where the rails meet the clouds.</div>
+        <button id="start-btn" style="display: none;">BOARD TRAIN</button>
+        <div id="loading-status" class="loading-text">Constructing the World... 0%</div>
+    </div>
+
+    <div id="cinematic-bars">
+        <div class="bar"></div>
+        <div class="bar"></div>
+    </div>
+
+    <div id="crosshair"></div>
+
+    <div id="ui-layer">
+        <div id="telemetry" class="panel">
+            <div class="tel-row"><span class="tel-label">Selected Train</span><span id="ui-train" class="tel-val">Locomotive #1</span></div>
+            <div class="tel-row"><span class="tel-label">Speed</span><span id="ui-speed" class="tel-val">0 km/h</span></div>
+            <div class="tel-row"><span class="tel-label">Altitude</span><span id="ui-alt" class="tel-val">0 m</span></div>
+            <div class="tel-row"><span class="tel-label">Region</span><span id="ui-region" class="tel-val">Ground Station</span></div>
+            <div class="tel-row"><span class="tel-label">Next Stop</span><span id="ui-next" class="tel-val">---</span></div>
+            <div class="tel-row" style="margin-top:10px; border-top:1px solid rgba(255,255,255,0.1); padding-top:10px;">
+                <span class="tel-label">Block Signal</span>
+                <span id="ui-signal" class="signal-indicator"></span>
+            </div>
+            <div class="tel-row" style="margin-top: 5px;">
+                <span class="tel-label">Auto Dispatch</span>
+                <span id="ui-dispatch" class="tel-val" style="color: #6a5; cursor:pointer;">ON</span>
+            </div>
+        </div>
+
+        <div id="map-panel" class="panel">
+            <canvas id="map-canvas"></canvas>
+        </div>
+
+        <div id="weather-time">
+            <button class="wt-btn" id="btn-time">TIME: AUTO</button>
+            <button class="wt-btn" id="btn-weather">WEATHER: CLEAR</button>
+            <button class="wt-btn" id="btn-ui">HIDE UI</button>
+        </div>
+
+        <div id="controls">
+            <button class="btn" id="btn-prev">◀<span class="btn-label">Prev Train</span></button>
+            <button class="btn cam-active" id="btn-cam-free">FREE<span class="btn-label">Camera</span></button>
+            <button class="btn" id="btn-cam-chase">CHASE<span class="btn-label">Camera</span></button>
+            <button class="btn" id="btn-cam-side">SIDE<span class="btn-label">Camera</span></button>
+            <button class="btn" id="btn-cam-pov">POV<span class="btn-label">Locomotive</span></button>
+            <button class="btn" id="btn-cam-pass">PASS.<span class="btn-label">Window</span></button>
+            <button class="btn" id="horn-btn">HORN<span class="btn-label">Sound</span></button>
+            <button class="btn" id="btn-next">▶<span class="btn-label">Next Train</span></button>
+        </div>
+    </div>
+
+    <!-- Load Three.js from CDN -->
+    <script type="module">
+        import * as THREE from 'https://cdn.skypack.dev/three@0.136.0/build/three.module.js';
+
+        // ==========================================
+        // GLOBALS & CONSTANTS
+        // ==========================================
+        const CLOUD_ALTITUDE = 180;
+        const SKY_ALTITUDE = 200;
+        const WORLD_SCALE = 1;
+        let scene, camera, renderer, audioCtx;
+        let timeOfDay = 8; // 0-24
+        let autoTime = true;
+        let weather = 'CLEAR';
+        let trains = [];
+        let selectedTrainIndex = 0;
+        let cameraMode = 'CHASE'; // FREE, CHASE, SIDE, POV, PASS
+        let keys = { w:false, a:false, s:false, d:false, q:false, e:false };
+        let clock = new THREE.Clock();
+        let autoDispatch = true;
+        
+        let trackNetwork = [];
+        let nodes = [];
+        let blocks = [];
+        let sceneryGroups = [];
+        let particles = [];
+        let creatures = [];
+        
+        let globalUniforms = {
+            time: { value: 0 },
+            fogColor: { value: new THREE.Color() },
+            fogDensity: { value: 0 },
+            cloudHeight: { value: CLOUD_ALTITUDE }
+        };
+
+        // Materials cache
+        const mats = {
+            rails: new THREE.MeshStandardMaterial({color: 0x444444, metalness: 0.8, roughness: 0.4}),
+            sleepers: new THREE.MeshLambertMaterial({color: 0x3d2817}),
+            grass: new THREE.MeshLambertMaterial({color: 0x5c8a32}),
+            rock: new THREE.MeshLambertMaterial({color: 0x555555}),
+            snow: new THREE.MeshLambertMaterial({color: 0xffffff}),
+            wood: new THREE.MeshLambertMaterial({color: 0x5c3a21}),
+            glass: new THREE.MeshPhysicalMaterial({color: 0xadd8e6, transparent: true, opacity: 0.4, roughness: 0.1, transmission: 0.9}),
+            cloud: new THREE.MeshLambertMaterial({color: 0xffffff, transparent: true, opacity: 0.8, depthWrite: false})
+        };
+
+        // ==========================================
+        // INITIALIZATION
+        // ==========================================
+        init();
+
+        function updateLoading(percent, text) {
+            document.getElementById('loading-status').innerText = `${text}... ${percent}%`;
+        }
+
+        async function init() {
+            // Setup ThreeJS
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+            scene.fog = new THREE.FogExp2(0x87CEEB, 0.002);
+            globalUniforms.fogColor.value.copy(scene.fog.color);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2500);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.HemisphereLight(0xffffff, 0x444455, 0.6);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xfff5e6, 1.2);
+            dirLight.position.set(500, 800, -500);
+            dirLight.castShadow = true;
+            dirLight.shadow.camera.left = -500;
+            dirLight.shadow.camera.right = 500;
+            dirLight.shadow.camera.top = 500;
+            dirLight.shadow.camera.bottom = -500;
+            dirLight.shadow.camera.far = 2000;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            scene.add(dirLight);
+            scene.userData.dirLight = dirLight;
+
+            // Generate World
+            updateLoading(10, "Laying Tracks");
+            await new Promise(r => setTimeout(r, 10)); // Yield to paint
+            buildTrackNetwork();
+            
+            updateLoading(30, "Growing Forests");
+            await new Promise(r => setTimeout(r, 10));
+            buildEnvironment();
+
+            updateLoading(50, "Building Sky Station");
+            await new Promise(r => setTimeout(r, 10));
+            buildSkyWorld();
+
+            updateLoading(70, "Summoning Creatures");
+            await new Promise(r => setTimeout(r, 10));
+            buildCreatures();
+
+            updateLoading(85, "Assembling Trains");
+            await new Promise(r => setTimeout(r, 10));
+            buildTrains();
+
+            updateLoading(100, "Ready");
+            
+            const btn = document.getElementById('start-btn');
+            const status = document.getElementById('loading-status');
+            btn.style.display = 'block';
+            status.style.display = 'none';
+
+            btn.addEventListener('click', () => {
+                initAudio();
+                document.getElementById('loading-screen').style.opacity = '0';
+                setTimeout(() => document.getElementById('loading-screen').style.display = 'none', 2000);
+                document.getElementById('ui-layer').style.display = 'block';
+                document.getElementById('cinematic-bars').classList.add('cinema-mode');
+                setTimeout(() => document.getElementById('cinematic-bars').classList.remove('cinema-mode'), 4000);
+                
+                // Initial camera positioning
+                cameraMode = 'POV';
+                updateUI();
+                animate();
+            });
+
+            setupInput();
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        // ==========================================
+        // TRACK & RAILWAY LOGIC
+        // ==========================================
+        class Node {
+            constructor(id, x, y, z) {
+                this.id = id;
+                this.pos = new THREE.Vector3(x, y, z);
+                this.outTracks = []; // Tracks leaving this node
+            }
+        }
+
+        class Track {
+            constructor(id, n1, n2, points, isSiding=false, speedLimit=25) {
+                this.id = id;
+                this.n1 = n1;
+                this.n2 = n2;
+                this.curve = new THREE.CatmullRomCurve3(points);
+                this.length = this.curve.getLength();
+                this.isSiding = isSiding;
+                this.speedLimit = speedLimit;
+                
+                // Block signaling (approx every 150 units)
+                this.blocks = [];
+                const numBlocks = Math.max(1, Math.floor(this.length / 150));
+                for(let i=0; i<numBlocks; i++) {
+                    this.blocks.push({ occupant: null, type: 'GREEN' });
+                }
+                
+                n1.outTracks.push(this);
+                trackNetwork.push(this);
+            }
+            getPointAt(t) { return this.curve.getPointAt(t); }
+            getTangentAt(t) { return this.curve.getTangentAt(t); }
+        }
+
+        function buildTrackNetwork() {
+            // Define Waypoints
+            const N = {
+                G1: new Node('G1', 0, 0, 200),
+                G2: new Node('G2', 400, 5, 400),
+                G3: new Node('G3', 800, 0, 0),
+                M1: new Node('M1', 600, 20, -400),
+                M2: new Node('M2', 200, 60, -600),
+                M3: new Node('M3', -200, 100, -400),
+                M4: new Node('M4', -400, 140, 0),
+                M5: new Node('M5', -200, 180, 400), // Cloud entry
+                S1: new Node('S1', 200, 210, 600),   // Sky bridge start
+                S2: new Node('S2', 800, 215, 600),   // Sky station approach
+                S3A: new Node('S3A', 1000, 215, 600),// Sky Station Plat 1
+                S3B: new Node('S3B', 1000, 215, 620),// Sky Station Plat 2
+                S4: new Node('S4', 1200, 215, 600),
+                S5: new Node('S5', 1400, 220, 200),
+                S6: new Node('S6', 1000, 210, -400),
+                D1: new Node('D1', 400, 150, -200),
+                D2: new Node('D2', 0, 80, -100),
+                D3: new Node('D3', -200, 0, 100)
+            };
+            Object.values(N).forEach(n => nodes.push(n));
+
+            // Helper to generate curvy paths
+            const makePath = (p1, p2, midPts=[]) => [p1.pos, ...midPts, p2.pos];
+
+            // Build Tracks
+            new Track('T_G1_G2', N.G1, N.G2, makePath(N.G1, N.G2, [new THREE.Vector3(200, 2, 350)]));
+            new Track('T_G2_G3', N.G2, N.G3, makePath(N.G2, N.G3, [new THREE.Vector3(700, 8, 300)]));
+            new Track('T_G3_M1', N.G3, N.M1, makePath(N.G3, N.M1, [new THREE.Vector3(850, 10, -200)]));
+            
+            // Mountain Spiral
+            new Track('T_M1_M2', N.M1, N.M2, makePath(N.M1, N.M2, [new THREE.Vector3(500, 40, -650)]));
+            new Track('T_M2_M3', N.M2, N.M3, makePath(N.M2, N.M3, [new THREE.Vector3(-50, 80, -700)]));
+            new Track('T_M3_M4', N.M3, N.M4, makePath(N.M3, N.M4, [new THREE.Vector3(-450, 120, -300)]));
+            new Track('T_M4_M5', N.M4, N.M5, makePath(N.M4, N.M5, [new THREE.Vector3(-500, 160, 200)]));
+            
+            // Sky Entry & Bridge
+            new Track('T_M5_S1', N.M5, N.S1, makePath(N.M5, N.S1, [new THREE.Vector3(0, 200, 550)]));
+            new Track('T_S1_S2', N.S1, N.S2, makePath(N.S1, N.S2, [new THREE.Vector3(500, 212, 600)])); // Sky Bridge
+            
+            // Sky Station Junction
+            new Track('T_S2_S3A', N.S2, N.S3A, [N.S2.pos, N.S3A.pos], false, 10);
+            new Track('T_S2_S3B', N.S2, N.S3B, [N.S2.pos, new THREE.Vector3(900, 215, 620), N.S3B.pos], true, 10); // Siding
+            new Track('T_S3A_S4', N.S3A, N.S4, [N.S3A.pos, N.S4.pos]);
+            new Track('T_S3B_S4', N.S3B, N.S4, [N.S3B.pos, new THREE.Vector3(1100, 215, 620), N.S4.pos]);
+
+            // Sky Loop & Descent
+            new Track('T_S4_S5', N.S4, N.S5, makePath(N.S4, N.S5, [new THREE.Vector3(1450, 225, 400)]));
+            new Track('T_S5_S6', N.S5, N.S6, makePath(N.S5, N.S6, [new THREE.Vector3(1300, 215, -100)]));
+            new Track('T_S6_D1', N.S6, N.D1, makePath(N.S6, N.D1, [new THREE.Vector3(700, 180, -400)]));
+            new Track('T_D1_D2', N.D1, N.D2, makePath(N.D1, N.D2, [new THREE.Vector3(200, 110, -250)]));
+            new Track('T_D2_D3', N.D2, N.D3, makePath(N.D2, N.D3, [new THREE.Vector3(-100, 40, -50)]));
+            new Track('T_D3_G1', N.D3, N.G1, makePath(N.D3, N.G1, [new THREE.Vector3(-150, 0, 150)]));
+
+            // Generate Track Geometry
+            const trackGeo = new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(0,0,0), new THREE.Vector3(1,0,0)]), 1, 0.2, 3);
+            const sleeperGeo = new THREE.BoxGeometry(3, 0.4, 0.8);
+            
+            let totalLength = 0;
+            trackNetwork.forEach(t => totalLength += t.length);
+            
+            const railInst = new THREE.InstancedMesh(trackGeo, mats.rails, Math.floor(totalLength)*2);
+            const sleepInst = new THREE.InstancedMesh(sleeperGeo, mats.sleepers, Math.floor(totalLength/2));
+            
+            let rIdx = 0, sIdx = 0;
+            const dummy = new THREE.Object3D();
+            const up = new THREE.Vector3(0,1,0);
+
+            trackNetwork.forEach(track => {
+                const len = track.length;
+                // Sleepers
+                for(let i=0; i<len; i+=2) {
+                    const t = i/len;
+                    const pt = track.getPointAt(t);
+                    const tan = track.getTangentAt(t);
+                    dummy.position.copy(pt);
+                    dummy.quaternion.setFromUnitVectors(new THREE.Vector3(1,0,0), tan);
+                    dummy.updateMatrix();
+                    sleepInst.setMatrixAt(sIdx++, dummy.matrix);
+                }
+                // Rails (Extruded along curve via simpler segments to save perf, using instanced cylinders acting as segments)
+                for(let i=0; i<len; i+=4) {
+                    const t1 = i/len;
+                    const t2 = Math.min((i+4)/len, 1);
+                    const p1 = track.getPointAt(t1);
+                    const p2 = track.getPointAt(t2);
+                    const dist = p1.distanceTo(p2);
+                    const tan = track.getTangentAt(t1);
+                    const cross = new THREE.Vector3().crossVectors(tan, up).normalize().multiplyScalar(1.2);
+                    
+                    // Left rail
+                 
