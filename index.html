@@ -29,7 +29,7 @@ window.__threeFallback=function(){
 <script src="https://cdn.jsdelivr.net/npm/three@0.136.0/build/three.min.js" onerror="window.__threeFallback()"></script>
 <script>
 window.__bootCloudJunction=function(){if(window.__cjBooted)return;if(!window.THREE)return;window.__cjBooted=true;const status=document.getElementById('status'),prog=document.getElementById('prog'),start=document.getElementById('start');
-function fail(m){status.textContent='Error: '+m;status.style.color='#ffaaaa'};if(!window.THREE){fail('3D engine failed to load. Reload page.');return}
+function fail(m){status.textContent='Error: '+m;status.style.color='#ffaaaa'};
 try{
 prog.style.width='15%';status.textContent='Laying celestial rails…';
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x91cbe2);scene.fog=new THREE.FogExp2(0xa9d5e6,.00065);
@@ -75,4 +75,16 @@ renderer.domElement.onpointerdown=e=>{drag=true;lx=e.clientX;ly=e.clientY};onpoi
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
 }catch(e){console.error(e);fail(e.message)}
 }; if(window.THREE) window.__bootCloudJunction();
+</script>
+<script>
+setTimeout(function(){
+ const st=document.getElementById('status');
+ if(!window.__cjBooted){
+   if(window.THREE && window.__bootCloudJunction){window.__bootCloudJunction();return;}
+   st.textContent='3D engine blocked. Tap RETRY.';
+   st.style.color='#ffb3b3';
+   const b=document.getElementById('start'); b.style.display='block'; b.textContent='RETRY ENGINE';
+   b.onclick=function(){location.href=location.pathname+'?v='+Date.now()};
+ }
+},8000);
 </script></body></html>
