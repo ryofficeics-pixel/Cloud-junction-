@@ -15,9 +15,20 @@ button.ctrl{border:1px solid #ffffff33;background:#101923cc;color:#fff;border-ra
 <div id="world"></div><div id="load"><h1>THE CELESTIAL RAILWAY</h1><div class="sub">WHERE THE RAILS MEET THE CLOUDS</div><div class="bar"><i id="prog"></i></div><div id="status">Loading engine…</div><button id="start">BOARD TRAIN</button></div>
 <div id="hud"><div class="card"><b id="trainName">Celestial Express</b><br>SPEED <span id="speed">72</span> km/h<br>ALTITUDE <span id="alt">0</span> m<br>REGION <span id="region">Meadow</span></div><div id="hint">Drag to look • wheel to zoom</div>
 <div id="controls"><button class="ctrl" id="prev">◀<small>TRAIN</small></button><button class="ctrl" id="cam">POV<small>CAMERA</small></button><button class="ctrl horn" id="horn">HORN<small>HOLD</small></button><button class="ctrl" id="weather">☀<small>WEATHER</small></button><button class="ctrl" id="next">▶<small>TRAIN</small></button></div></div>
-<script src="https://cdn.jsdelivr.net/npm/three@0.136.0/build/three.min.js"></script>
 <script>
-(()=>{const status=document.getElementById('status'),prog=document.getElementById('prog'),start=document.getElementById('start');
+window.__threeFallback=function(){
+ var el=document.getElementById('status');
+ if(el) el.textContent='Retrying 3D engine…';
+ var sc=document.createElement('script');
+ sc.src='https://unpkg.com/three@0.136.0/build/three.min.js';
+ sc.onload=function(){ if(window.__bootCloudJunction) window.__bootCloudJunction(); };
+ sc.onerror=function(){ if(el){el.textContent='3D engine could not load — tap to retry';el.style.color='#ffb3b3';el.onclick=function(){location.reload()};} };
+ document.head.appendChild(sc);
+};
+</script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.136.0/build/three.min.js" onerror="window.__threeFallback()"></script>
+<script>
+window.__bootCloudJunction=function(){if(window.__cjBooted)return;if(!window.THREE)return;window.__cjBooted=true;const status=document.getElementById('status'),prog=document.getElementById('prog'),start=document.getElementById('start');
 function fail(m){status.textContent='Error: '+m;status.style.color='#ffaaaa'};if(!window.THREE){fail('3D engine failed to load. Reload page.');return}
 try{
 prog.style.width='15%';status.textContent='Laying celestial rails…';
@@ -63,5 +74,5 @@ document.getElementById('horn').onpointerdown=audioHorn;document.getElementById(
 renderer.domElement.onpointerdown=e=>{drag=true;lx=e.clientX;ly=e.clientY};onpointerup=()=>drag=false;onpointermove=e=>{if(drag&&mode===2){yaw-=(e.clientX-lx)*.008;pitch=Math.max(-.3,Math.min(.7,pitch+(e.clientY-ly)*.005));lx=e.clientX;ly=e.clientY}};renderer.domElement.onwheel=e=>zoom=Math.max(15,Math.min(90,zoom+e.deltaY*.03));
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
 }catch(e){console.error(e);fail(e.message)}
-})();
+}; if(window.THREE) window.__bootCloudJunction();
 </script></body></html>
