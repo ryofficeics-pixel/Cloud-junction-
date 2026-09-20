@@ -1,95 +1,116 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Cloud Junction — Celestial Railway</title>
-<style>
-*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101c27;font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#fff;touch-action:none}#world{position:fixed;inset:0}canvas{display:block}
-#load{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;flex-direction:column;background:linear-gradient(#12283a,#101820);transition:.8s}
-#load h1{font-size:clamp(32px,8vw,72px);font-weight:300;letter-spacing:.18em;text-align:center;margin:0 20px}.sub{letter-spacing:.2em;opacity:.65;margin:18px}.bar{width:min(70vw,420px);height:3px;background:#ffffff22;margin:28px}.bar i{display:block;height:100%;width:5%;background:#fff;transition:.25s}#status{opacity:.65}
-#start{display:none;border:1px solid #ffffff77;background:#ffffff16;color:#fff;border-radius:999px;padding:14px 30px;font-size:16px;letter-spacing:.12em}
-#hud{display:none;position:fixed;inset:0;z-index:5;pointer-events:none}.card{position:absolute;top:max(12px,env(safe-area-inset-top));left:12px;background:#0b1420aa;backdrop-filter:blur(8px);padding:10px 13px;border:1px solid #ffffff1f;border-radius:12px;font-size:12px;line-height:1.65}.card b{font-size:14px}
-#controls{position:absolute;bottom:max(14px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);display:flex;gap:7px;pointer-events:auto;width:max-content;max-width:96vw}
-button.ctrl{border:1px solid #ffffff33;background:#101923cc;color:#fff;border-radius:11px;padding:10px 12px;min-width:58px;font-weight:700}button.ctrl small{display:block;font-size:8px;opacity:.55;margin-top:3px}.horn{background:#7b2b2bcc!important}
-#hint{position:absolute;right:12px;top:max(12px,env(safe-area-inset-top));background:#0b142099;padding:8px 10px;border-radius:9px;font-size:11px;opacity:.8}
-@media(max-width:700px){#hint{display:none}.card{font-size:10px}.card b{font-size:12px}button.ctrl{padding:9px 8px;min-width:48px;font-size:11px}#controls{gap:4px}}
-</style></head><body>
-<div id="world"></div><div id="load"><h1>THE CELESTIAL RAILWAY</h1><div class="sub">WHERE THE RAILS MEET THE CLOUDS</div><div class="bar"><i id="prog"></i></div><div id="status">Loading engine…</div><button id="start">BOARD TRAIN</button></div>
-<div id="hud"><div class="card"><b id="trainName">Celestial Express</b><br>SPEED <span id="speed">72</span> km/h<br>ALTITUDE <span id="alt">0</span> m<br>REGION <span id="region">Meadow</span></div><div id="hint">Drag to look • wheel to zoom</div>
-<div id="controls"><button class="ctrl" id="prev">◀<small>TRAIN</small></button><button class="ctrl" id="cam">POV<small>CAMERA</small></button><button class="ctrl horn" id="horn">HORN<small>HOLD</small></button><button class="ctrl" id="weather">☀<small>WEATHER</small></button><button class="ctrl" id="next">▶<small>TRAIN</small></button></div></div>
-<script>
-window.__threeFallback=function(){
- var el=document.getElementById('status');
- if(el) el.textContent='Retrying 3D engine…';
- var sc=document.createElement('script');
- sc.src='https://unpkg.com/three@0.136.0/build/three.min.js';
- sc.onload=function(){ if(window.__bootCloudJunction) window.__bootCloudJunction(); };
- sc.onerror=function(){ if(el){el.textContent='3D engine could not load — tap to retry';el.style.color='#ffb3b3';el.onclick=function(){location.reload()};} };
- document.head.appendChild(sc);
-};
-</script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.136.0/build/three.min.js" onerror="window.__threeFallback()"></script>
-<script>
-window.__bootCloudJunction=function(){if(window.__cjBooted)return;if(!window.THREE)return;window.__cjBooted=true;const status=document.getElementById('status'),prog=document.getElementById('prog'),start=document.getElementById('start');
-function fail(m){status.textContent='Error: '+m;status.style.color='#ffaaaa'};
-try{
-prog.style.width='15%';status.textContent='Laying celestial rails…';
-const scene=new THREE.Scene();scene.background=new THREE.Color(0x9eddf2);scene.fog=new THREE.FogExp2(0xc8eaf2,.00042);
-const camera=new THREE.PerspectiveCamera(62,innerWidth/innerHeight,.1,6000);const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
-renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.outputEncoding=THREE.sRGBEncoding;document.getElementById('world').appendChild(renderer.domElement);
-scene.add(new THREE.HemisphereLight(0xfff8df,0x78a8ad,1.55));const sun=new THREE.DirectionalLight(0xffe4ae,1.55);sun.position.set(-400,700,300);scene.add(sun);
-const mat=(c)=>new THREE.MeshLambertMaterial({color:c});const railMat=new THREE.MeshStandardMaterial({color:0x3b4144,metalness:.7,roughness:.4});
-const ground=new THREE.Mesh(new THREE.CircleGeometry(2100,64),new THREE.MeshLambertMaterial({color:0x8fd8e7,transparent:true,opacity:.35}));ground.rotation.x=-Math.PI/2;ground.position.y=-220;scene.add(ground);
-const pts=[[-650,3,0],[-520,6,300],[-220,15,430],[120,25,300],[390,45,40],[520,85,-300],[300,130,-520],[-80,175,-570],[-390,215,-380],[-500,250,-40],[-390,285,310],[-80,315,500],[300,335,500],[680,350,350],[900,365,0],[680,345,-350],[300,320,-500],[-80,260,-400],[-350,160,-220],[-600,55,-80],[-650,3,0]].map(p=>new THREE.Vector3(...p));
-const curve=new THREE.CatmullRomCurve3(pts,true,'catmullrom',.35);const length=curve.getLength();
-function tube(offset,rad,material){const pp=[];for(let i=0;i<=500;i++){const p=curve.getPointAt(i/500),t=curve.getTangentAt(i/500),side=new THREE.Vector3(-t.z,0,t.x).normalize().multiplyScalar(offset);pp.push(p.clone().add(side))}const c=new THREE.CatmullRomCurve3(pp,true);scene.add(new THREE.Mesh(new THREE.TubeGeometry(c,700,rad,5,true),material))}
-tube(-1.55,.11,railMat);tube(1.55,.11,railMat);
-const sleeperG=new THREE.BoxGeometry(4.2,.22,.48),sleepers=new THREE.InstancedMesh(sleeperG,mat(0x4b3526),900),d=new THREE.Object3D();
-for(let i=0;i<900;i++){const u=i/900,p=curve.getPointAt(u),t=curve.getTangentAt(u);d.position.copy(p);d.position.y-=.15;d.rotation.y=Math.atan2(t.x,t.z);d.updateMatrix();sleepers.setMatrixAt(i,d.matrix)}scene.add(sleepers);
-prog.style.width='40%';status.textContent='Growing forests and mountains…';
-const trunkG=new THREE.CylinderGeometry(.8,1.2,8,5),leafG=new THREE.ConeGeometry(5,13,7),trees=new THREE.Group();
-for(let i=0;i<260;i++){const a=Math.random()*Math.PI*2,r=250+Math.random()*1500,x=Math.cos(a)*r,z=Math.sin(a)*r;if(Math.random()<.22)continue;const tr=new THREE.Mesh(trunkG,mat(0x6a4930));tr.position.set(x,1,z);const le=new THREE.Mesh(leafG,mat(i%5?0x426f3c:0x769d52));le.position.set(x,11,z);const s=.7+Math.random()*1.6;tr.scale.set(s,s,s);le.scale.set(s,s,s);trees.add(tr,le)}scene.add(trees);
-for(let i=0;i<28;i++){const g=new THREE.ConeGeometry(100+Math.random()*150,220+Math.random()*330,7);const m=new THREE.Mesh(g,mat(i%4?0x6d7b69:0x87958b));const a=Math.random()*6.28,r=850+Math.random()*900;m.position.set(Math.cos(a)*r,80,Math.sin(a)*r);scene.add(m)}
-const water=new THREE.Mesh(new THREE.CircleGeometry(420,64),new THREE.MeshLambertMaterial({color:0x5faac2,transparent:true,opacity:.75}));water.rotation.x=-Math.PI/2;water.position.set(350,-1,500);scene.add(water);
-prog.style.width='62%';status.textContent='Building the Sky Station…';
-const island=new THREE.Mesh(new THREE.CylinderGeometry(150,65,55,9),mat(0x71805e));island.position.set(650,315,350);scene.add(island);
-const station=new THREE.Group();const base=new THREE.Mesh(new THREE.BoxGeometry(150,7,48),mat(0xb7a47f));const hall=new THREE.Mesh(new THREE.BoxGeometry(80,35,40),mat(0xd7c7a4));hall.position.y=21;const roof=new THREE.Mesh(new THREE.ConeGeometry(62,24,4),mat(0x50656b));roof.position.y=50;roof.rotation.y=Math.PI/4;const clockFace=new THREE.Mesh(new THREE.CylinderGeometry(10,10,2,24),mat(0xf4e6bd));clockFace.rotation.x=Math.PI/2;clockFace.position.set(0,40,-22);station.add(base,hall,roof,clockFace);station.position.set(650,350,350);scene.add(station);
-const cloudMat=new THREE.MeshLambertMaterial({color:0xfffdf1,transparent:true,opacity:.72,depthWrite:false});const clouds=[];
-for(let i=0;i<90;i++){const c=new THREE.Mesh(new THREE.SphereGeometry(25+Math.random()*45,8,6),cloudMat);c.position.set((Math.random()-.5)*3000,-120+Math.random()*260,(Math.random()-.5)*3000);c.scale.y=.35+Math.random()*.3;scene.add(c);clouds.push(c)}
-prog.style.width='78%';status.textContent='Summoning sky creatures…';
-const whale=new THREE.Group(),body=new THREE.Mesh(new THREE.SphereGeometry(1,20,12),mat(0x527d91));body.scale.set(42,14,13);const finG=new THREE.ConeGeometry(12,35,3),f1=new THREE.Mesh(finG,mat(0x638fa0)),f2=f1.clone();f1.position.set(0,-2,18);f2.position.set(0,-2,-18);f1.rotation.x=1.2;f2.rotation.x=-1.2;whale.add(body,f1,f2);whale.position.set(300,420,-500);scene.add(whale);
-prog.style.width='88%';status.textContent='Assembling trains…';
-// Floating fantasy settlements
-function islandAt(x,y,z,scale=1){const g=new THREE.Group();const rock=new THREE.Mesh(new THREE.CylinderGeometry(55*scale,18*scale,55*scale,9),mat(0x718266));rock.position.y=-25*scale;g.add(rock);const lawn=new THREE.Mesh(new THREE.CylinderGeometry(58*scale,55*scale,9*scale,10),mat(0x7fa75f));g.add(lawn);for(let k=0;k<3;k++){const h=new THREE.Mesh(new THREE.BoxGeometry(18*scale,22*scale,16*scale),mat(0xf1e4c6));h.position.set((-22+k*22)*scale,15*scale,(k%2?10:-8)*scale);const r=new THREE.Mesh(new THREE.ConeGeometry(15*scale,9*scale,4),mat(k%2?0x315e61:0xb85c43));r.position.copy(h.position);r.position.y+=15*scale;r.rotation.y=Math.PI/4;g.add(h,r)}g.position.set(x,y,z);scene.add(g)}
-islandAt(-350,250,310,.9);islandAt(80,390,120,.7);islandAt(620,330,-150,1.05);islandAt(1050,390,220,.65);islandAt(-900,160,-400,.75);islandAt(400,470,720,.6);
-// Decorative hanging track supports
-for(let i=0;i<38;i++){const u=i/38,p=curve.getPointAt(u);if(p.y<120)continue;const post=new THREE.Mesh(new THREE.CylinderGeometry(.7,1.4,Math.max(18,p.y*.16),6),mat(0x79563b));post.position.set(p.x,p.y-Math.max(18,p.y*.16)/2-2,p.z);scene.add(post)}
-const colors=[0x8d342f,0x294e68,0x4f653c,0x6b4c78];const names=['Celestial Express','Azure Limited','Forest Local','Moonlight Mail'];const trains=[];
-function makeTrain(i){const g=new THREE.Group(),eng=new THREE.Mesh(new THREE.BoxGeometry(14,8,7),mat(colors[i]));eng.position.y=5;g.add(eng);const cab=new THREE.Mesh(new THREE.BoxGeometry(6,8,7),mat(0xd4b46f));cab.position.set(5,9,0);g.add(cab);const boiler=new THREE.Mesh(new THREE.CylinderGeometry(2.4,2.4,8,10),mat(colors[i]));boiler.rotation.z=Math.PI/2;boiler.position.set(-5,7,0);g.add(boiler);for(let j=1;j<=3;j++){const car=new THREE.Mesh(new THREE.BoxGeometry(11,6,6),mat(j%2?0xd3a55c:colors[i]));car.position.x=13*j;car.position.y=4;g.add(car)}scene.add(g);return{g,u:i*.235,speed:.018+i*.0015,name:names[i]}}
-for(let i=0;i<4;i++)trains.push(makeTrain(i));
-let selected=0,mode=0,rain=false,yaw=0,pitch=.1,zoom=30,drag=false,lx=0,ly=0,audio=null;const animClock=new THREE.Clock();
-function placeTrain(t){const p=curve.getPointAt(t.u%1),tan=curve.getTangentAt(t.u%1);t.g.position.copy(p);t.g.position.y+=1;t.g.rotation.y=Math.atan2(tan.x,tan.z)+Math.PI/2}
-trains.forEach(placeTrain);
-prog.style.width='100%';status.textContent='Ready';start.style.display='block';
-function audioHorn(){if(!audio)audio=new (window.AudioContext||window.webkitAudioContext)();const o=audio.createOscillator(),gain=audio.createGain();o.type='sawtooth';o.frequency.value=110+selected*35;gain.gain.setValueAtTime(.11,audio.currentTime);gain.gain.exponentialRampToValueAtTime(.001,audio.currentTime+.8);o.connect(gain).connect(audio.destination);o.start();o.stop(audio.currentTime+.85)}
-function updateCam(){const t=trains[selected],p=t.g.position.clone(),tan=curve.getTangentAt(t.u%1).normalize();if(mode===0){camera.position.copy(p).add(tan.clone().multiplyScalar(-42)).add(new THREE.Vector3(0,24,0));camera.lookAt(p.clone().add(tan.clone().multiplyScalar(20)).add(new THREE.Vector3(0,4,0)))}else if(mode===1){camera.position.copy(p).add(new THREE.Vector3(0,7,0)).add(tan.clone().multiplyScalar(7));camera.lookAt(p.clone().add(tan.clone().multiplyScalar(55)).add(new THREE.Vector3(0,5,0)))}else{camera.position.set(p.x+Math.sin(yaw)*zoom,p.y+14+Math.sin(pitch)*zoom,p.z+Math.cos(yaw)*zoom);camera.lookAt(p)}}
-function animate(){requestAnimationFrame(animate);const dt=Math.min(.04,animClock.getDelta());trains.forEach((t,i)=>{t.u=(t.u+t.speed*dt)%1;placeTrain(t)});clouds.forEach((c,i)=>{c.position.x+=dt*(1+i%3)*.7;if(c.position.x>1600)c.position.x=-1600});const tm=performance.now()*.00006;whale.position.x=500+Math.cos(tm)*750;whale.position.z=Math.sin(tm)*700;whale.position.y=420+Math.sin(tm*3)*25;whale.rotation.y=-tm+Math.PI/2;f1.rotation.z=Math.sin(tm*10)*.15;f2.rotation.z=-Math.sin(tm*10)*.15;updateCam();const p=trains[selected].g.position;document.getElementById('alt').textContent=Math.max(0,Math.round(p.y));document.getElementById('region').textContent=p.y>300?'Sky Realm':p.y>180?'Cloud Pass':p.y>70?'Highlands':'Meadow';renderer.render(scene,camera)}
-start.onclick=()=>{document.getElementById('load').style.opacity=0;setTimeout(()=>document.getElementById('load').style.display='none',800);document.getElementById('hud').style.display='block';animate()};
-function select(n){selected=(n+trains.length)%trains.length;document.getElementById('trainName').textContent=trains[selected].name;document.getElementById('speed').textContent=Math.round(trains[selected].speed*4000)}
-document.getElementById('prev').onclick=()=>select(selected-1);document.getElementById('next').onclick=()=>select(selected+1);document.getElementById('cam').onclick=e=>{mode=(mode+1)%3;e.currentTarget.firstChild.nodeValue=['CHASE','POV','ORBIT'][mode]};
-document.getElementById('horn').onpointerdown=audioHorn;document.getElementById('weather').onclick=e=>{rain=!rain;scene.fog.density=rain?.0015:.00065;scene.background.set(rain?0x607789:0x91cbe2);e.currentTarget.firstChild.nodeValue=rain?'☁':'☀'};
-renderer.domElement.onpointerdown=e=>{drag=true;lx=e.clientX;ly=e.clientY};onpointerup=()=>drag=false;onpointermove=e=>{if(drag&&mode===2){yaw-=(e.clientX-lx)*.008;pitch=Math.max(-.3,Math.min(.7,pitch+(e.clientY-ly)*.005));lx=e.clientX;ly=e.clientY}};renderer.domElement.onwheel=e=>zoom=Math.max(15,Math.min(90,zoom+e.deltaY*.03));
-addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
-}catch(e){console.error(e);fail(e.message)}
-}; if(window.THREE) window.__bootCloudJunction();
-</script>
-<script>
-setTimeout(function(){
- const st=document.getElementById('status');
- if(!window.__cjBooted){
-   if(window.THREE && window.__bootCloudJunction){window.__bootCloudJunction();return;}
-   st.textContent='3D engine blocked. Tap RETRY.';
-   st.style.color='#ffb3b3';
-   const b=document.getElementById('start'); b.style.display='block'; b.textContent='RETRY ENGINE';
-   b.onclick=function(){location.href=location.pathname+'?v='+Date.now()};
- }
-},8000);
-</script></body></html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+    <meta name="theme-color" content="#95d7e5" />
+    <meta name="description" content="Cloud Junction — a playable celestial railway journey above the clouds." />
+    <title>Cloud Junction — The Celestial Railway</title>
+  </head>
+  <body>
+    <main id="world" aria-label="Cloud Junction 3D world"></main>
+
+    <section id="loading" class="loading-screen" aria-live="polite">
+      <div class="loading-sky" aria-hidden="true">
+        <span class="loading-cloud cloud-a"></span><span class="loading-cloud cloud-b"></span><span class="loading-cloud cloud-c"></span>
+      </div>
+      <div class="brand-lockup">
+        <p class="eyebrow">WELCOME ABOARD</p>
+        <h1>CLOUD<br /><span>JUNCTION</span></h1>
+        <p class="tagline">WHERE THE RAILS MEET THE CLOUDS</p>
+        <div class="loading-track"><i id="progressBar"></i></div>
+        <p id="loadingStatus" class="loading-status">Preparing your journey…</p>
+        <button id="startButton" class="primary-button" type="button" disabled>
+          <span>BOARD THE CELESTIAL RAILWAY</span><small>Tap to begin · audio starts on boarding</small>
+        </button>
+        <button id="retryButton" class="retry-button hidden" type="button">RETRY JOURNEY</button>
+        <p id="startupError" class="startup-error hidden"></p>
+      </div>
+      <p class="loading-footnote">An original interactive railway world</p>
+    </section>
+
+    <section id="hud" class="hud hidden" aria-label="Train controls">
+      <header class="topbar">
+        <article class="journey-card glass">
+          <div><p class="label">NOW DRIVING</p><h2 id="trainName">Celestial Express</h2></div>
+          <div class="journey-meta">
+            <span><b id="regionName">Sunlit Meadow Isles</b><small>REGION</small></span>
+            <span><b id="altitudeValue">0 m</b><small>ALTITUDE</small></span>
+            <span><b id="fpsValue">60</b><small>FPS</small></span>
+          </div>
+        </article>
+        <nav class="top-actions" aria-label="Views and settings">
+          <button id="cameraButton" class="icon-button glass" type="button" aria-label="Change camera"><span>◉</span><small id="cameraLabel">CHASE</small></button>
+          <button id="mapButton" class="icon-button glass" type="button" aria-label="Open route map"><span>⌁</span><small>MAP</small></button>
+          <button id="settingsButton" class="icon-button glass" type="button" aria-label="Open settings"><span>⚙</span><small>SETTINGS</small></button>
+        </nav>
+      </header>
+
+      <aside id="eventBanner" class="event-banner glass hidden"><p class="label">SCENIC MOMENT</p><strong id="eventTitle">The Great Sky Bridge</strong></aside>
+
+      <div class="train-switcher glass">
+        <button id="previousTrain" type="button" aria-label="Previous train">‹</button>
+        <span><small>TRAIN</small><b id="trainCounter">1 / 6</b></span>
+        <button id="nextTrain" type="button" aria-label="Next train">›</button>
+      </div>
+
+      <section class="drive-console glass">
+        <div class="speed-cluster">
+          <p class="label">SPEED</p><div><b id="speedValue">0</b><span>km/h</span></div><p id="operationMode" class="mode-pill">AUTO DRIVE</p>
+        </div>
+        <div class="destination-cluster">
+          <p class="label">NEXT STATION</p><strong id="nextStation">Grand Cloud Junction</strong>
+          <div class="distance-row"><span id="stationDistance">— km</span><i><b id="routeProgress"></b></i><span id="stationEta">— min</span></div>
+        </div>
+        <div class="levers">
+          <label class="lever-control"><span><b>POWER</b><em id="powerValue">65%</em></span><input id="powerControl" type="range" min="0" max="100" value="65" /></label>
+          <label class="lever-control brake-control"><span><b>BRAKE</b><em id="brakeValue">0%</em></span><input id="brakeControl" type="range" min="0" max="100" value="0" /></label>
+        </div>
+        <div class="drive-buttons">
+          <button id="reverseButton" class="console-button" type="button"><span>↕</span><small>FORWARD</small></button>
+          <button id="autoButton" class="console-button active" type="button"><span>◈</span><small>AUTO</small></button>
+          <button id="switchButton" class="console-button" type="button"><span>⑂</span><small id="switchLabel">MEADOW LINE</small></button>
+          <button id="hornButton" class="console-button horn-button" type="button"><span>♬</span><small>HORN</small></button>
+        </div>
+      </section>
+      <p class="desktop-hint">Drag to orbit · wheel to zoom · W/S power · Space brake · C camera · H horn</p>
+    </section>
+
+    <section id="mapPanel" class="modal-panel hidden" role="dialog" aria-modal="true" aria-labelledby="mapTitle">
+      <div class="panel-shell glass">
+        <header><div><p class="label">CELESTIAL RAILWAY NETWORK</p><h2 id="mapTitle">Journey Map</h2></div><button class="close-button" data-close="mapPanel" type="button">×</button></header>
+        <div class="map-stage"><canvas id="routeMap" width="900" height="560"></canvas><div class="map-legend"><span class="legend-player">Selected train</span><span class="legend-train">Other trains</span><span class="legend-station">Station</span></div></div>
+        <div id="destinationList" class="destination-list"></div>
+      </div>
+    </section>
+
+    <section id="settingsPanel" class="modal-panel hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <div class="panel-shell settings-shell glass">
+        <header><div><p class="label">JOURNEY OPTIONS</p><h2 id="settingsTitle">Settings</h2></div><button class="close-button" data-close="settingsPanel" type="button">×</button></header>
+        <div class="settings-grid">
+          <label><span>Graphics quality</span><select id="qualitySelect"><option value="low">Low · fastest</option><option value="medium">Medium</option><option value="high">High · detailed</option></select></label>
+          <label><span>Weather</span><select id="weatherSelect"><option value="clear">Clear skies</option><option value="mist">Mountain mist</option><option value="rain">Rain</option><option value="storm">Thunderstorm</option><option value="snow">Snow</option></select></label>
+          <label><span>Time of day</span><select id="timeSelect"><option value="cycle">Dynamic cycle</option><option value="dawn">Dawn</option><option value="day">Midday</option><option value="sunset">Golden hour</option><option value="night">Night</option></select></label>
+          <label class="toggle-row"><span>Cinematic moments<small>Brief scenic camera near landmarks</small></span><input id="cinematicToggle" type="checkbox" checked /></label>
+          <label class="toggle-row"><span>Journey audio<small>Engine, rail and wind ambience</small></span><input id="audioToggle" type="checkbox" checked /></label>
+        </div>
+        <p class="settings-note">Changes apply immediately. Mobile defaults are intentionally conservative to prevent overheating and crashes.</p>
+      </div>
+    </section>
+
+    <div id="fatalError" class="fatal-error hidden" role="alert"><strong>THE JOURNEY COULD NOT START</strong><p id="fatalMessage">An unexpected error occurred.</p><button type="button" onclick="location.reload()">RELOAD APPLICATION</button></div>
+
+    <script>
+      window.__CJ_MODULE_READY__ = false;
+      window.__CJ_WATCHDOG__ = setTimeout(function () {
+        if (window.__CJ_MODULE_READY__) return;
+        var message = document.getElementById('startupError'); var retry = document.getElementById('retryButton'); var status = document.getElementById('loadingStatus');
+        if (status) status.textContent = 'The railway engine did not respond.';
+        if (message) { message.textContent = 'Check your connection, then retry. If this repeats, WebGL may be disabled.'; message.classList.remove('hidden'); }
+        if (retry) retry.classList.remove('hidden');
+      }, 15000);
+      document.getElementById('retryButton').addEventListener('click', function () { location.reload(); });
+    </script>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
