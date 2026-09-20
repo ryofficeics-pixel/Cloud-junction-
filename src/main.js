@@ -57,6 +57,7 @@ let signals = [];
 let stations = [];
 let aurelion;
 let audioSystem;
+let activeHorn;
 
 const worldGroups = {
   world: new THREE.Group(), tracks: new THREE.Group(), islands: new THREE.Group(), buildings: new THREE.Group(),
@@ -106,7 +107,7 @@ function createMaterials() {
   Object.assign(materials, {
     rail: colorMaterial(0x4c5658, { roughness: 0.3, metalness: 0.74 }), railTop: colorMaterial(0xa5b2ad, { roughness: 0.2, metalness: 0.84 }),
     sleeper: colorMaterial(0x60412e, { roughness: 0.96 }), darkWood: colorMaterial(0x3f3028), brass: colorMaterial(0xc79a48, { roughness: 0.34, metalness: 0.63 }),
-    stone: colorMaterial(0x717b72, { flatShading: true }), paleStone: colorMaterial(0xa6a690, { flatShading: true }),
+    stone: colorMaterial(0x717b72, { flatShading: true }), paleStone: colorMaterial(0xa6a690, { flatShading: true }), ballast: colorMaterial(0x6f675a, { roughness: 1, flatShading: true }),
     rock: colorMaterial(0x687268, { flatShading: true }), rockWarm: colorMaterial(0x816f5e, { flatShading: true }), rockCold: colorMaterial(0x74818b, { flatShading: true }),
     grass: colorMaterial(0x779957, { flatShading: true }), gardenGrass: colorMaterial(0x68a36a, { flatShading: true }), mangoGrass: colorMaterial(0xb5954f, { flatShading: true }),
     frostGrass: colorMaterial(0xd9e4dd, { flatShading: true }), stormGrass: colorMaterial(0x596b62, { flatShading: true }),
@@ -149,15 +150,43 @@ function createRouteDefinitions() {
   });
 }
 
-function offsetCurve(baseCurve, offset, samples = 420) {
+function trackCantAt(route, u) {
+  const sampleDistance = 0.004;
+  const before = route.curve.getTangentAt(clamp(u - sampleDistance, 0, 1)).normalize();
+  const after = route.curve.getTangentAt(clamp(u + sampleDistance, 0, 1)).normalize();
+  const signedTurn = new THREE.Vector3().crossVectors(before, after).y;
+  return clamp(-signedTurn * 9.5, -0.095, 0.095);
+}
+
+function trackFrameAt(routeIndex, u) {
+  const route = routes[routeIndex];
+  const safeU = clamp(u, 0, 1);
+  const position = route.curve.getPointAt(safeU);
+  const tangent = route.curve.getTangentAt(safeU).normalize();
+  const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), tangent).normalize();
+  if (right.lengthSq() < 0.001) right.set(1, 0, 0);
+  const cant = trackCantAt(route, safeU);
+  right.applyAxisAngle(tangent, cant).normalize();
+  const up = new THREE.Vector3().crossVectors(tangent, right).normalize();
+  return { position, tangent, right, up, cant };
+}
+
+function trackQuaternion(frame) {
+  return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(frame.right, frame.up, frame.tangent));
+}
+
+function vehicleQuaternion(frame, direction) {
+  const localX = frame.right.clone().multiplyScalar(-direction);
+  const localZ = frame.tangent.clone().multiplyScalar(-direction);
+  return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(localX, frame.up, localZ));
+}
+
+function offsetCurve(route, offset, samples = 420) {
   const points = [];
-  const up = new THREE.Vector3(0, 1, 0);
   for (let index = 0; index <= samples; index += 1) {
     const u = index / samples;
-    const point = baseCurve.getPointAt(u);
-    const tangent = baseCurve.getTangentAt(u).normalize();
-    const side = new THREE.Vector3().crossVectors(up, tangent).normalize();
-    points.push(point.add(side.multiplyScalar(offset)));
+    const frame = trackFrameAt(route.index, u);
+    points.push(frame.position.addScaledVector(frame.right, offset));
   }
   return new THREE.CatmullRomCurve3(points, false, 'catmullrom', 0.4);
 }
@@ -186,7 +215,7 @@ function createTrackNetwork() {
   routes.forEach((route) => {
     const railSegments = profile.trackSegments;
     [-2.05, 2.05].forEach((offset) => {
-      const railCurve = offsetCurve(route.curve, offset, Math.floor(railSegments * 0.72));
+      const railCurve = offsetCurve(route, offset, Math.floor(railSegments * 0.72));
       const rail = new THREE.Mesh(new THREE.TubeGeometry(railCurve, railSegments, 0.23, 5, false), materials.railTop);
       rail.castShadow = profile.shadows;
       rail.receiveShadow = profile.shadows;
@@ -195,9 +224,9 @@ function createTrackNetwork() {
     const totalSleepers = Math.ceil(route.length / 6.3);
     for (let index = 0; index < totalSleepers; index += 1) {
       const u = index / Math.max(1, totalSleepers - 1);
-      const { position, tangent } = poseOnRoute(route.index, u, 0, -0.3);
-      dummy.position.copy(position);
-      dummy.rotation.set(0, Math.atan2(tangent.x, tangent.z), 0);
+      const frame = trackFrameAt(route.index, u);
+      dummy.position.copy(frame.position).addScaledVector(frame.up, -0.3);
+      dummy.quaternion.copy(trackQuaternion(frame));
       dummy.scale.set(1, 1, 1);
       dummy.updateMatrix();
       sleeperMesh.setMatrixAt(sleeperIndex, dummy.matrix);
@@ -219,7 +248,9 @@ function createBridge(routeIndex, fromU, toU, style) {
   const bays = Math.max(5, Math.floor(span / 42));
   for (let index = 0; index <= bays; index += 1) {
     const u = lerp(fromU, toU, index / bays);
-    const { position, tangent, side } = poseOnRoute(routeIndex, u, 0, -2.2);
+    const frame = trackFrameAt(routeIndex, u);
+    const position = frame.position.clone().addScaledVector(frame.up, -2.2);
+    const side = frame.right;
     const height = style === 'stone' ? range(24, 58) : range(50, 120);
     const supportMaterial = style === 'steel' ? materials.signalPost : style === 'suspension' ? materials.brass : materials.paleStone;
     if (index % 2 === 0 || style === 'stone') {
@@ -242,8 +273,8 @@ function createBridge(routeIndex, fromU, toU, style) {
       });
     }
     const deck = new THREE.Mesh(new THREE.BoxGeometry(6.8, 0.6, Math.max(8, span / bays + 2)), materials.darkWood);
-    deck.position.copy(position).add(new THREE.Vector3(0, -1.25, 0));
-    deck.rotation.y = Math.atan2(tangent.x, tangent.z);
+    deck.position.copy(frame.position).addScaledVector(frame.up, -1.25);
+    deck.quaternion.copy(trackQuaternion(frame));
     worldGroups.details.add(deck);
   }
 }
@@ -490,8 +521,28 @@ function createHouse(scale = 1, roofColor = 'terracotta', elaborate = false) {
 const treePlacements = [];
 function addTreePlacement(position, scale, type = 'leaf') { treePlacements.push({ position: position.clone(), scale, type }); }
 
+function isInsideTrackCorridor(worldPosition, corridors, extraClearance = 0) {
+  return corridors.some((corridor) => {
+    const tangent = corridor.tangent.clone().setY(0).normalize();
+    const side = new THREE.Vector3(tangent.z, 0, -tangent.x);
+    const relative = worldPosition.clone().sub(corridor.point);
+    return Math.abs(relative.dot(side)) < corridor.halfWidth + extraClearance;
+  });
+}
+
+function islandPlacement(position, radius, minimumRadius, maximumRadius, corridors, extraClearance) {
+  let local = new THREE.Vector3();
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    const angle = range(0, Math.PI * 2);
+    const distance = range(radius * minimumRadius, radius * maximumRadius);
+    local = new THREE.Vector3(Math.cos(angle) * distance, 1, Math.sin(angle) * distance);
+    if (!isInsideTrackCorridor(local.clone().add(position), corridors, extraClearance)) return local;
+  }
+  return local;
+}
+
 function createFloatingIsland(options) {
-  const { position, radius = 70, depth = radius * 0.9, biome = 'meadow', houses = 1, trees = 10, landmark = '' } = options;
+  const { position, radius = 70, depth = radius * 0.9, biome = 'meadow', houses = 1, trees = 10, landmark = '', trackCorridors = [] } = options;
   const group = new THREE.Group();
   group.position.copy(position);
   const rockMaterial = biome === 'frost' ? materials.rockCold : biome === 'mango' ? materials.rockWarm : materials.rock;
@@ -519,18 +570,15 @@ function createFloatingIsland(options) {
   }
 
   for (let index = 0; index < houses; index += 1) {
-    const angle = range(0, Math.PI * 2);
-    const distance = range(radius * 0.16, radius * 0.55);
+    const local = islandPlacement(position, radius, 0.18, 0.62, trackCorridors, 8);
     const roofColor = biome === 'frost' ? 'navy' : index % 2 ? 'teal' : 'terracotta';
     const house = createHouse(radius > 120 ? 1.18 : 0.8, roofColor, index === 0);
-    house.position.set(Math.cos(angle) * distance, 0.8, Math.sin(angle) * distance);
-    house.rotation.y = -angle + Math.PI * 0.5;
+    house.position.copy(local).setY(0.8);
+    house.rotation.y = -Math.atan2(local.z, local.x) + Math.PI * 0.5;
     group.add(house);
   }
   for (let index = 0; index < trees; index += 1) {
-    const angle = range(0, Math.PI * 2);
-    const distance = Math.sqrt(random()) * radius * 0.74;
-    const local = new THREE.Vector3(Math.cos(angle) * distance, 1, Math.sin(angle) * distance);
+    const local = islandPlacement(position, radius, 0.06, 0.78, trackCorridors, 4);
     const worldPosition = local.add(position);
     const treeType = biome === 'frost' || biome === 'pine' ? 'pine' : biome === 'mango' ? 'gold' : 'leaf';
     addTreePlacement(worldPosition, range(0.72, 1.45) * (radius > 120 ? 1.25 : 1), treeType);
@@ -611,15 +659,46 @@ function makeWaterfall(position, height = 120, width = 13) {
   worldGroups.details.add(waterfall);
 }
 
+function createLandTrackBeds(definitions) {
+  const patches = [];
+  definitions.forEach(([routeIndex, u, , size]) => {
+    const route = routes[routeIndex];
+    const halfLength = size === 'grand' ? 118 : 58;
+    const segments = Math.ceil((halfLength * 2) / 5.5);
+    for (let index = 0; index <= segments; index += 1) {
+      const distance = lerp(-halfLength, halfLength, index / segments);
+      const patchU = clamp(u + distance / route.length, 0.002, 0.998);
+      patches.push(trackFrameAt(routeIndex, patchU));
+    }
+  });
+  const bed = new THREE.InstancedMesh(new THREE.BoxGeometry(6.9, 0.68, 5.7), materials.ballast, patches.length);
+  const dummy = new THREE.Object3D();
+  patches.forEach((frame, index) => {
+    dummy.position.copy(frame.position).addScaledVector(frame.up, -0.69);
+    dummy.quaternion.copy(trackQuaternion(frame));
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    bed.setMatrixAt(index, dummy.matrix);
+  });
+  bed.instanceMatrix.needsUpdate = true;
+  bed.receiveShadow = true;
+  worldGroups.tracks.add(bed);
+}
+
 function createStation(routeIndex, u, name, size = 'small', biome = 'meadow') {
   const { position, tangent, side } = poseOnRoute(routeIndex, u, 0, 0);
+  const trackFrame = trackFrameAt(routeIndex, u);
   const station = new THREE.Group();
   const platformLength = size === 'grand' ? 150 : 52;
   const platform = new THREE.Mesh(new THREE.BoxGeometry(size === 'grand' ? 30 : 14, 1.3, platformLength), materials.paleStone);
-  platform.position.y = 0.25;
+  const platformOffset = size === 'grand' ? -18 : -8;
+  platform.position.copy(trackFrame.position).addScaledVector(trackFrame.right, platformOffset).addScaledVector(trackFrame.up, -0.42);
+  platform.quaternion.copy(trackQuaternion(trackFrame));
+  platform.receiveShadow = true;
+  worldGroups.buildings.add(platform);
   const building = createHouse(size === 'grand' ? 1.65 : 0.86, biome === 'frost' ? 'navy' : 'teal', true);
   building.position.set(size === 'grand' ? 22 : 10, 1, 0);
-  station.add(platform, building);
+  station.add(building);
   if (size === 'grand') {
     const canopy = new THREE.Mesh(new THREE.BoxGeometry(58, 0.7, 116), materials.glass);
     canopy.position.set(-10, 17, 0);
@@ -640,7 +719,7 @@ function createStation(routeIndex, u, name, size = 'small', biome = 'meadow') {
     station.add(tower, towerRoof, clockFace);
   }
   station.add(createLabelSprite(name, size === 'grand' ? 42 : 24, new THREE.Vector3(0, size === 'grand' ? 29 : 17, -platformLength * 0.3)));
-  station.position.copy(position).addScaledVector(side, size === 'grand' ? -18 : -8).add(new THREE.Vector3(0, -1.15, 0));
+  station.position.copy(position).addScaledVector(side, platformOffset).add(new THREE.Vector3(0, -1.15, 0));
   station.rotation.y = Math.atan2(tangent.x, tangent.z);
   station.traverse((child) => { if (child.isMesh) { child.castShadow = state.quality !== 'low'; child.receiveShadow = true; } });
   worldGroups.buildings.add(station);
@@ -657,6 +736,11 @@ function createWorldRegions() {
     [1, 0.65, 'Frost Crown', 'small', 'frost'], [2, 0.5, 'Thunder Pass', 'small', 'storm'],
     [2, 0.77, 'Celestial Gate', 'small', 'meadow'],
   ];
+  const junctionBeds = [
+    [0, 0.978, '', 'grand'], [1, 0.978, '', 'grand'], [2, 0.978, '', 'grand'],
+    [1, 0.012, '', 'grand'], [2, 0.012, '', 'grand'],
+  ];
+  createLandTrackBeds([...stationDefinitions, ...junctionBeds]);
   stationDefinitions.forEach((definition) => createStation(...definition));
 
   const islandDefinitions = [
@@ -666,8 +750,10 @@ function createWorldRegions() {
     [2, 0.5, 125, 'storm', 2, 18, 'THUNDER PASS', 14], [2, 0.77, 145, 'meadow', 3, 20, 'CELESTIAL GATE', -14],
   ];
   islandDefinitions.forEach(([routeIndex, u, radius, biome, houses, trees, landmark, lateral]) => {
-    const pose = poseOnRoute(routeIndex, u, lateral, -3);
-    createFloatingIsland({ position: pose.position, radius, depth: radius * range(0.75, 1.25), biome, houses, trees, landmark });
+    const pose = poseOnRoute(routeIndex, u, lateral, -4.2);
+    const routePose = poseOnRoute(routeIndex, u);
+    const trackCorridors = [{ point: routePose.position, tangent: routePose.tangent, halfWidth: 12 }];
+    createFloatingIsland({ position: pose.position, radius, depth: radius * range(0.75, 1.25), biome, houses, trees, landmark, trackCorridors });
     if (biome === 'garden' || biome === 'meadow') makeWaterfall(pose.position.clone().add(pose.side.clone().multiplyScalar(radius * 0.62)), radius * 1.45, radius * 0.12);
   });
 
@@ -683,7 +769,11 @@ function createWorldRegions() {
       trees: Math.floor(range(2, 10)),
     });
   }
-  createFloatingIsland({ position: new THREE.Vector3(0, 333, 0), radius: 265, depth: 205, biome: 'meadow', houses: 10, trees: 44 });
+  const hubCorridors = routes.flatMap((route) => [0.01, 0.99].map((u) => {
+    const frame = poseOnRoute(route.index, u);
+    return { point: frame.position, tangent: frame.tangent, halfWidth: 14 };
+  }));
+  createFloatingIsland({ position: new THREE.Vector3(0, 332, 0), radius: 265, depth: 205, biome: 'meadow', houses: 10, trees: 44, trackCorridors: hubCorridors });
   createGrandSkyCity();
   createVegetationInstances();
   createWindmillsAndObservatories();
@@ -718,7 +808,7 @@ function createCityTower(x, z, height, width, roofMaterial, tier = 0) {
     chimney.position.set(width * 0.36, height * 1.08, -width * 0.18);
     tower.add(chimney);
   }
-  tower.position.set(x, 334, z);
+  tower.position.set(x, 332.5, z);
   tower.traverse((child) => { if (child.isMesh) { child.castShadow = state.quality !== 'low'; child.receiveShadow = true; } });
   worldGroups.buildings.add(tower);
   return tower;
@@ -906,12 +996,12 @@ function createSkyMantas() {
 }
 
 const trainConfigs = [
-  { name: 'Celestial Express', routeIndex: 0, u: 0.955, maxSpeed: 32, color: 'railwayOrange', accent: 'brass', cars: 4, type: 'steam', horn: [116, 146], passengers: 184 },
-  { name: 'Azure Limited', routeIndex: 1, u: 0.2, maxSpeed: 39, color: 'inkBlue', accent: 'brass', cars: 3, type: 'streamline', horn: [196, 247, 294], passengers: 126 },
-  { name: 'Forest Local', routeIndex: 0, u: 0.53, maxSpeed: 24, color: 'green', accent: 'copper', cars: 2, type: 'steam', horn: [440], passengers: 58 },
-  { name: 'Moonlight Mail', routeIndex: 2, u: 0.74, maxSpeed: 30, color: 'purple', accent: 'brass', cars: 3, type: 'mail', horn: [98, 131], passengers: 34 },
-  { name: 'Cloud Freight', routeIndex: 2, u: 0.16, maxSpeed: 22, color: 'copper', accent: 'darkWood', cars: 5, type: 'freight', horn: [82, 103], passengers: 2 },
-  { name: 'Sky Tram', routeIndex: 1, u: 0.58, maxSpeed: 27, color: 'railwayOrange', accent: 'enamelCream', cars: 1, type: 'tram', horn: [523, 659], passengers: 42 },
+  { name: 'Celestial Express', routeIndex: 0, u: 0.955, maxSpeed: 32, color: 'railwayOrange', accent: 'brass', cars: 4, type: 'steam', horn: { family: 'air', frequencies: [110, 138.6], attack: 0.1, release: 0.5, brightness: 920, breath: 0.22, vibrato: 1.2, gain: 0.34 }, passengers: 184 },
+  { name: 'Azure Limited', routeIndex: 1, u: 0.2, maxSpeed: 39, color: 'inkBlue', accent: 'brass', cars: 3, type: 'streamline', horn: { family: 'air', frequencies: [164.8, 207.7, 261.6], attack: 0.065, release: 0.34, brightness: 1450, breath: 0.12, vibrato: 0.7, gain: 0.28 }, passengers: 126 },
+  { name: 'Forest Local', routeIndex: 0, u: 0.53, maxSpeed: 24, color: 'green', accent: 'copper', cars: 2, type: 'steam', horn: { family: 'whistle', frequencies: [392, 493.9], attack: 0.16, release: 0.72, brightness: 1900, breath: 0.38, vibrato: 5.2, gain: 0.24 }, passengers: 58 },
+  { name: 'Moonlight Mail', routeIndex: 2, u: 0.74, maxSpeed: 30, color: 'purple', accent: 'brass', cars: 3, type: 'mail', horn: { family: 'whistle', frequencies: [92.5, 123.5, 146.8], attack: 0.22, release: 0.95, brightness: 720, breath: 0.3, vibrato: 2.4, gain: 0.31 }, passengers: 34 },
+  { name: 'Cloud Freight', routeIndex: 2, u: 0.16, maxSpeed: 22, color: 'copper', accent: 'darkWood', cars: 5, type: 'freight', horn: { family: 'air', frequencies: [73.4, 92.5, 110, 138.6], attack: 0.075, release: 0.62, brightness: 650, breath: 0.2, vibrato: 0.45, gain: 0.4 }, passengers: 2 },
+  { name: 'Sky Tram', routeIndex: 1, u: 0.58, maxSpeed: 27, color: 'railwayOrange', accent: 'enamelCream', cars: 1, type: 'tram', horn: { family: 'air', frequencies: [329.6, 415.3], attack: 0.035, release: 0.22, brightness: 2300, breath: 0.08, vibrato: 0.35, gain: 0.2 }, passengers: 42 },
 ];
 
 function createWheel(radius = 1.35, width = 0.65, colorMaterialRef = materials.rail) {
@@ -1139,14 +1229,16 @@ function getPartPose(train, offset) {
   } else if (distance > currentRoute.length) {
     distance -= currentRoute.length;
   }
-  return poseOnRoute(routeIndex, clamp(distance / routes[routeIndex].length, 0, 1), 0, 1.55);
+  const u = clamp(distance / routes[routeIndex].length, 0, 1);
+  const frame = trackFrameAt(routeIndex, u);
+  return { ...frame, routeIndex, u, position: frame.position.clone().addScaledVector(frame.up, 0.26) };
 }
 
 function updateTrainVisual(train, delta) {
   train.parts.forEach((part) => {
-    const { position, tangent } = getPartPose(train, part.offset);
-    part.root.position.copy(position);
-    part.root.rotation.set(0, Math.atan2(tangent.x * train.direction, tangent.z * train.direction) + Math.PI, 0);
+    const pose = getPartPose(train, part.offset);
+    part.root.position.copy(pose.position);
+    part.root.quaternion.copy(vehicleQuaternion(pose, train.direction));
     const wheelRotation = (train.speed * delta) / 1.25;
     part.root.userData.wheels.forEach((wheel) => { wheel.rotation.x -= wheelRotation * train.direction; });
   });
@@ -1405,7 +1497,34 @@ function createAudioSystem() {
   windGain.gain.value = 0.008;
   windSource.connect(windFilter).connect(windGain).connect(master);
   windSource.start();
-  return { context, master, engineOscillator, engineGain, engineFilter, windGain };
+
+  const hornBus = context.createGain();
+  const hornCompressor = context.createDynamicsCompressor();
+  hornCompressor.threshold.value = -16;
+  hornCompressor.knee.value = 12;
+  hornCompressor.ratio.value = 5;
+  hornCompressor.attack.value = 0.008;
+  hornCompressor.release.value = 0.24;
+  hornBus.connect(hornCompressor).connect(master);
+
+  const hornReverb = context.createConvolver();
+  const impulseLength = Math.floor(context.sampleRate * 1.15);
+  const impulse = context.createBuffer(2, impulseLength, context.sampleRate);
+  for (let channel = 0; channel < impulse.numberOfChannels; channel += 1) {
+    const data = impulse.getChannelData(channel);
+    for (let index = 0; index < impulseLength; index += 1) {
+      data[index] = (Math.random() * 2 - 1) * Math.pow(1 - index / impulseLength, 2.7);
+    }
+  }
+  hornReverb.buffer = impulse;
+  const hornReverbGain = context.createGain();
+  hornReverbGain.gain.value = 0.16;
+  hornBus.connect(hornReverb).connect(hornReverbGain).connect(master);
+
+  const real = new Float32Array(8);
+  const imaginary = new Float32Array([0, 1, 0.52, 0.3, 0.18, 0.11, 0.07, 0.04]);
+  const hornWave = context.createPeriodicWave(real, imaginary, { disableNormalization: false });
+  return { context, master, engineOscillator, engineGain, engineFilter, windGain, noiseBuffer, hornBus, hornWave };
 }
 
 function updateAudio() {
@@ -1420,30 +1539,82 @@ function updateAudio() {
   audioSystem.windGain.gain.setTargetAtTime(enabled * (0.004 + train.speed * 0.0005), now, 0.2);
 }
 
-function playHorn() {
+function startHorn() {
   if (!state.audioEnabled) return;
   if (!audioSystem) audioSystem = createAudioSystem();
   if (!audioSystem) return;
+  if (activeHorn) return;
   if (audioSystem.context.state === 'suspended') audioSystem.context.resume();
   const train = selectedTrain();
+  const profile = train.horn;
   const now = audioSystem.context.currentTime;
-  train.horn.forEach((frequency, index) => {
-    const oscillator = audioSystem.context.createOscillator();
-    const gain = audioSystem.context.createGain();
-    const filter = audioSystem.context.createBiquadFilter();
-    const start = now + index * 0.15;
-    const duration = train.type === 'tram' ? 0.24 : train.type === 'steam' ? 0.72 : 0.5;
-    oscillator.type = train.type === 'streamline' ? 'triangle' : 'sawtooth';
-    oscillator.frequency.setValueAtTime(frequency, start);
-    oscillator.frequency.exponentialRampToValueAtTime(frequency * 0.97, start + duration);
-    filter.type = 'lowpass';
-    filter.frequency.value = train.type === 'freight' ? 480 : 1100;
-    gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(train.type === 'freight' ? 0.34 : 0.2, start + 0.045);
-    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
-    oscillator.connect(filter).connect(gain).connect(audioSystem.master);
-    oscillator.start(start);
-    oscillator.stop(start + duration + 0.05);
+  const envelope = audioSystem.context.createGain();
+  const formant = audioSystem.context.createBiquadFilter();
+  const presence = audioSystem.context.createBiquadFilter();
+  formant.type = 'lowpass';
+  formant.frequency.value = profile.brightness;
+  formant.Q.value = profile.family === 'whistle' ? 1.8 : 0.72;
+  presence.type = 'peaking';
+  presence.frequency.value = profile.family === 'whistle' ? 1300 : 420;
+  presence.Q.value = 0.8;
+  presence.gain.value = profile.family === 'whistle' ? 4 : 2.5;
+  envelope.gain.setValueAtTime(0.0001, now);
+  envelope.gain.exponentialRampToValueAtTime(profile.gain, now + profile.attack);
+  envelope.connect(formant).connect(presence).connect(audioSystem.hornBus);
+
+  const sources = [];
+  profile.frequencies.forEach((frequency, index) => {
+    [-1, 1].forEach((detuneDirection, voiceIndex) => {
+      const oscillator = audioSystem.context.createOscillator();
+      const voiceGain = audioSystem.context.createGain();
+      const start = now + index * 0.012 + voiceIndex * 0.004;
+      if (profile.family === 'whistle') oscillator.type = voiceIndex ? 'sine' : 'triangle';
+      else oscillator.setPeriodicWave(audioSystem.hornWave);
+      oscillator.detune.value = detuneDirection * (profile.family === 'whistle' ? 3.5 : 5.5);
+      oscillator.frequency.setValueAtTime(frequency * 0.982, start);
+      oscillator.frequency.exponentialRampToValueAtTime(frequency, start + profile.attack * 1.4);
+      voiceGain.gain.value = (voiceIndex ? 0.34 : 0.66) / Math.sqrt(profile.frequencies.length);
+      oscillator.connect(voiceGain).connect(envelope);
+
+      const vibrato = audioSystem.context.createOscillator();
+      const vibratoDepth = audioSystem.context.createGain();
+      vibrato.frequency.value = profile.vibrato;
+      vibratoDepth.gain.value = profile.family === 'whistle' ? 5.5 : 1.4;
+      vibrato.connect(vibratoDepth).connect(oscillator.detune);
+      oscillator.start(start);
+      vibrato.start(start);
+      sources.push(oscillator, vibrato);
+    });
+  });
+
+  const breath = audioSystem.context.createBufferSource();
+  const breathFilter = audioSystem.context.createBiquadFilter();
+  const breathGain = audioSystem.context.createGain();
+  breath.buffer = audioSystem.noiseBuffer;
+  breath.loop = true;
+  breathFilter.type = 'bandpass';
+  breathFilter.frequency.value = profile.family === 'whistle' ? 1700 : 520;
+  breathFilter.Q.value = profile.family === 'whistle' ? 0.55 : 0.85;
+  breathGain.gain.value = profile.breath;
+  breath.connect(breathFilter).connect(breathGain).connect(envelope);
+  breath.start(now);
+  sources.push(breath);
+  activeHorn = { envelope, sources, release: profile.release };
+}
+
+function stopHorn() {
+  if (!activeHorn || !audioSystem) return;
+  const horn = activeHorn;
+  activeHorn = null;
+  const now = audioSystem.context.currentTime;
+  if (typeof horn.envelope.gain.cancelAndHoldAtTime === 'function') horn.envelope.gain.cancelAndHoldAtTime(now);
+  else {
+    horn.envelope.gain.cancelScheduledValues(now);
+    horn.envelope.gain.setValueAtTime(Math.max(0.0001, horn.envelope.gain.value), now);
+  }
+  horn.envelope.gain.exponentialRampToValueAtTime(0.0001, now + horn.release);
+  horn.sources.forEach((source) => {
+    try { source.stop(now + horn.release + 0.06); } catch { /* source already stopped */ }
   });
 }
 
@@ -1455,10 +1626,10 @@ function localPointToWorld(object, x, y, z) { return object.localToWorld(new THR
 
 function cameraCompositionForMode(train) {
   const locomotive = train.parts[0].root;
-  const routePose = poseOnRoute(train.routeIndex, train.u, 0, 1.5);
+  const routePose = getPartPose(train, 0);
   const position = routePose.position;
   const forward = routePose.tangent.clone().multiplyScalar(train.direction).normalize();
-  const side = new THREE.Vector3(forward.z, 0, -forward.x).normalize();
+  const side = routePose.right.clone().multiplyScalar(train.direction).normalize();
   const speedFactor = train.speed / train.maxSpeed;
   const mode = state.cameraMode;
 
@@ -1672,6 +1843,7 @@ function updateSwitchDisplay() {
 }
 
 function selectTrainByIndex(index) {
+  stopHorn();
   state.selectedTrain = (index + trains.length) % trains.length;
   const train = selectedTrain();
   state.pendingRoute = train.pendingRouteIndex ?? train.routeIndex;
@@ -1765,14 +1937,20 @@ function bindInterface() {
     selectedTrain().destinationOverride = '';
     updateSwitchDisplay();
   });
-  dom.hornButton.addEventListener('pointerdown', playHorn);
+  dom.hornButton.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    try { dom.hornButton.setPointerCapture(event.pointerId); } catch { /* synthetic pointer events have no active capture */ }
+    startHorn();
+  });
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach((eventName) => dom.hornButton.addEventListener(eventName, stopHorn));
+  window.addEventListener('pointerup', stopHorn);
 
   dom.quality.value = state.quality;
   dom.quality.addEventListener('change', () => applyQuality(dom.quality.value));
   dom.weather.addEventListener('change', () => applyWeather(dom.weather.value));
   dom.time.addEventListener('change', () => setTimeMode(dom.time.value));
   dom.cinematic.addEventListener('change', () => { state.cinematics = dom.cinematic.checked; });
-  dom.audio.addEventListener('change', () => { state.audioEnabled = dom.audio.checked; });
+  dom.audio.addEventListener('change', () => { state.audioEnabled = dom.audio.checked; if (!state.audioEnabled) stopHorn(); });
 
   renderer.domElement.addEventListener('pointerdown', (event) => {
     state.dragging = true;
@@ -1796,15 +1974,19 @@ function bindInterface() {
   window.addEventListener('keydown', (event) => {
     const train = selectedTrain();
     if (event.code === 'KeyC') cycleCamera();
-    else if (event.code === 'KeyH') playHorn();
+    else if (event.code === 'KeyH' && !event.repeat) startHorn();
     else if (event.code === 'KeyW' || event.code === 'ArrowUp') { train.auto = false; train.throttle = clamp(train.throttle + 0.08, 0, 1); }
     else if (event.code === 'KeyS' || event.code === 'ArrowDown') { train.auto = false; train.throttle = clamp(train.throttle - 0.08, 0, 1); }
     else if (event.code === 'Space') { event.preventDefault(); train.auto = false; train.brake = 1; }
     else if (event.code === 'KeyM') openPanel(dom.mapPanel);
   });
-  window.addEventListener('keyup', (event) => { if (event.code === 'Space') selectedTrain().brake = 0; });
+  window.addEventListener('keyup', (event) => {
+    if (event.code === 'Space') selectedTrain().brake = 0;
+    if (event.code === 'KeyH') stopHorn();
+  });
+  window.addEventListener('blur', stopHorn);
   window.addEventListener('resize', resizeRenderer);
-  document.addEventListener('visibilitychange', () => { state.paused = document.hidden; clock.getDelta(); });
+  document.addEventListener('visibilitychange', () => { state.paused = document.hidden; if (document.hidden) stopHorn(); clock.getDelta(); });
   renderer.domElement.addEventListener('webglcontextlost', (event) => { event.preventDefault(); showFatal(new Error('The graphics context was lost. Reload the application to continue.')); });
 }
 

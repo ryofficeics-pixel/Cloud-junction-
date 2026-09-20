@@ -33,6 +33,9 @@ test('desktop journey starts, moves, and every major control responds', async ({
   const trainNames = new Set();
   for (let index = 0; index < 6; index += 1) {
     trainNames.add(await page.locator('#trainName').innerText());
+    await page.locator('#hornButton').dispatchEvent('pointerdown', { pointerId: index + 10 });
+    await page.waitForTimeout(60);
+    await page.locator('#hornButton').dispatchEvent('pointerup', { pointerId: index + 10 });
     await page.locator('#nextTrain').click();
   }
   expect(trainNames.size).toBe(6);
