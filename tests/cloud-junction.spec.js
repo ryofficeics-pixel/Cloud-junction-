@@ -68,9 +68,15 @@ test('desktop journey starts, moves, and every major control responds', async ({
   expect(errors).toEqual([]);
 });
 
-test('Android-sized viewport keeps touch UI reachable and stable', async ({ page }) => {
+test('Android mobile profile keeps touch UI reachable and stable', async ({ browser }) => {
+  const page = await browser.newPage({
+    viewport: { width: 412, height: 915 },
+    userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36',
+    hasTouch: true,
+    isMobile: true,
+    deviceScaleFactor: 2.625,
+  });
   const errors = await collectRuntimeErrors(page);
-  await page.setViewportSize({ width: 412, height: 915 });
   await page.goto('/');
   const start = page.getByRole('button', { name: /board the celestial railway/i });
   await expect(start).toBeEnabled({ timeout: 25_000 });

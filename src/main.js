@@ -33,7 +33,7 @@ const routeNames = ['MEADOW LINE', 'CROWN LINE', 'TEMPEST LINE'];
 
 const state = {
   quality: initialQuality, started: false, paused: false, selectedTrain: 0, cameraMode: 0, orbitYaw: Math.PI, orbitPitch: 0.26,
-  orbitDistance: 56, dragging: false, pointerX: 0, pointerY: 0, weather: 'clear', timeMode: 'cycle', timeOfDay: 0.31,
+  orbitDistance: 56, dragging: false, pointerX: 0, pointerY: 0, weather: 'clear', timeMode: 'cycle', timeOfDay: 0.66,
   cinematics: true, audioEnabled: true, pendingRoute: 0, lastFrame: performance.now(), elapsed: 0, frames: 0, fpsTime: 0,
   mapOpen: false, settingsOpen: false, lastScenicKey: '', eventTimer: 0, cameraShake: 0,
 };
@@ -112,6 +112,8 @@ function createMaterials() {
     frostGrass: colorMaterial(0xd9e4dd, { flatShading: true }), stormGrass: colorMaterial(0x596b62, { flatShading: true }),
     plaster: colorMaterial(0xe8ddbd), plasterWarm: colorMaterial(0xefd4a4), teal: colorMaterial(0x376f72), terracotta: colorMaterial(0xa9563f),
     navy: colorMaterial(0x2d4859), red: colorMaterial(0x893f36), green: colorMaterial(0x466944), purple: colorMaterial(0x5e4b70), goldPaint: colorMaterial(0xb8883f),
+    railwayOrange: colorMaterial(0xc46b32, { roughness: 0.6, metalness: 0.13 }), copper: colorMaterial(0xa75c35, { roughness: 0.42, metalness: 0.52 }),
+    enamelCream: colorMaterial(0xf0c985, { roughness: 0.56, metalness: 0.08 }), inkBlue: colorMaterial(0x243d48, { roughness: 0.5, metalness: 0.18 }),
     glass: new THREE.MeshPhysicalMaterial({ color: 0xa7deea, transparent: true, opacity: 0.38, roughness: 0.16, metalness: 0.05, side: THREE.DoubleSide, depthWrite: false }),
     window: new THREE.MeshStandardMaterial({ color: 0xffdc81, emissive: 0xffa93a, emissiveIntensity: 0.6, roughness: 0.34 }),
     treeTrunk: colorMaterial(0x5d4130), pine: colorMaterial(0x315f4b, { flatShading: true }), leaf: colorMaterial(0x5f8d4b, { flatShading: true }),
@@ -368,22 +370,29 @@ function createSkyAndAtmosphere() {
 
 function createCloudBanks() {
   const count = qualityProfiles[state.quality].cloudLobes;
-  const geometry = new THREE.SphereGeometry(1, state.quality === 'low' ? 7 : 10, 6);
-  const cloudMaterial = new THREE.MeshLambertMaterial({ color: 0xfff7df, transparent: true, opacity: 0.58, depthWrite: false, roughness: 1 });
+  const geometry = new THREE.SphereGeometry(1, state.quality === 'low' ? 8 : 12, state.quality === 'low' ? 6 : 8);
+  const cloudMaterial = new THREE.MeshBasicMaterial({ color: 0xffedda, transparent: true, opacity: 0.62, depthWrite: false });
   cloudInstances = new THREE.InstancedMesh(geometry, cloudMaterial, count);
   const dummy = new THREE.Object3D();
   const clusterCenters = [];
-  const clusterCount = Math.ceil(count / 5);
+  const heroBanks = [
+    new THREE.Vector3(-850, 520, -1450), new THREE.Vector3(1180, 640, -1050),
+    new THREE.Vector3(-1550, 410, 620), new THREE.Vector3(1450, 760, 780),
+  ];
+  const clusterCount = Math.ceil(count / 7);
   for (let cluster = 0; cluster < clusterCount; cluster += 1) {
     const layer = cluster % 3;
-    clusterCenters.push(new THREE.Vector3(range(-2600, 2600), [95, 290, 720][layer] + range(-55, 55), range(-2600, 2600)));
+    clusterCenters.push(heroBanks[cluster]?.clone() || new THREE.Vector3(range(-2800, 2800), [92, 330, 760][layer] + range(-70, 70), range(-2800, 2800)));
   }
   for (let index = 0; index < count; index += 1) {
-    const cluster = clusterCenters[Math.floor(index / 5) % clusterCenters.length];
-    const layer = Math.floor(index / 5) % 3;
-    const size = layer === 0 ? range(34, 82) : layer === 1 ? range(22, 58) : range(15, 42);
-    dummy.position.copy(cluster).add(new THREE.Vector3(range(-95, 95), range(-16, 18), range(-55, 55)));
-    dummy.scale.set(size * range(1.3, 2.1), size * range(0.23, 0.44), size * range(0.8, 1.35));
+    const clusterIndex = Math.floor(index / 7) % clusterCenters.length;
+    const cluster = clusterCenters[clusterIndex];
+    const layer = clusterIndex % 3;
+    const hero = clusterIndex < heroBanks.length;
+    const size = hero ? range(55, 112) : layer === 0 ? range(38, 88) : layer === 1 ? range(30, 74) : range(20, 52);
+    const lobe = index % 7;
+    dummy.position.copy(cluster).add(new THREE.Vector3(range(-135, 135), lobe > 3 ? range(12, 72) : range(-24, 22), range(-78, 78)));
+    dummy.scale.set(size * range(1.25, 2.2), size * (lobe > 3 ? range(0.55, 0.92) : range(0.3, 0.58)), size * range(0.9, 1.5));
     dummy.rotation.y = range(0, Math.PI);
     dummy.updateMatrix();
     cloudInstances.setMatrixAt(index, dummy.matrix);
@@ -425,6 +434,19 @@ function createIslandGeometry(radius, depth, segments = 14) {
   return geometry;
 }
 
+function createIslandTopGeometry(radius, segments = 18) {
+  const shape = new THREE.Shape();
+  for (let segment = 0; segment < segments; segment += 1) {
+    const angle = (segment / segments) * Math.PI * 2;
+    const edge = radius * range(0.84, 1.01);
+    const x = Math.cos(angle) * edge;
+    const y = Math.sin(angle) * edge * range(0.9, 1.06);
+    if (segment === 0) shape.moveTo(x, y); else shape.lineTo(x, y);
+  }
+  shape.closePath();
+  return new THREE.ShapeGeometry(shape);
+}
+
 function createHouse(scale = 1, roofColor = 'terracotta', elaborate = false) {
   const house = new THREE.Group();
   const width = range(11, 18) * scale;
@@ -437,7 +459,9 @@ function createHouse(scale = 1, roofColor = 'terracotta', elaborate = false) {
   roof.rotation.y = Math.PI / 4;
   const door = new THREE.Mesh(new THREE.BoxGeometry(width * 0.2, height * 0.42, 0.3), materials.darkWood);
   door.position.set(width * 0.18, height * 0.21, depth * 0.51);
-  house.add(walls, roof, door);
+  const foundation = new THREE.Mesh(new THREE.BoxGeometry(width * 1.08, height * 0.16, depth * 1.08), materials.paleStone);
+  foundation.position.y = height * 0.08;
+  house.add(foundation, walls, roof, door);
   [-0.24, 0.24].forEach((x) => {
     const windowMesh = new THREE.Mesh(new THREE.BoxGeometry(width * 0.16, height * 0.2, 0.28), materials.window);
     windowMesh.position.set(width * x, height * 0.62, depth * 0.515);
@@ -446,6 +470,11 @@ function createHouse(scale = 1, roofColor = 'terracotta', elaborate = false) {
   const chimney = new THREE.Mesh(new THREE.BoxGeometry(width * 0.11, height * 0.48, width * 0.11), materials.darkWood);
   chimney.position.set(-width * 0.25, height * 1.12, 0);
   house.add(chimney);
+  [-1, 1].forEach((side) => {
+    const cornerPost = new THREE.Mesh(new THREE.BoxGeometry(width * 0.055, height * 0.82, depth * 0.055), materials.darkWood);
+    cornerPost.position.set(side * width * 0.46, height * 0.47, depth * 0.51);
+    house.add(cornerPost);
+  });
   if (elaborate) {
     const balcony = new THREE.Mesh(new THREE.BoxGeometry(width * 0.62, 0.55, depth * 0.28), materials.darkWood);
     balcony.position.set(0, height * 0.72, depth * 0.62);
@@ -470,11 +499,24 @@ function createFloatingIsland(options) {
   rock.castShadow = state.quality !== 'low';
   rock.receiveShadow = true;
   const grassMaterial = biome === 'frost' ? materials.frostGrass : biome === 'mango' ? materials.mangoGrass : biome === 'storm' ? materials.stormGrass : biome === 'garden' ? materials.gardenGrass : materials.grass;
-  const top = new THREE.Mesh(new THREE.CircleGeometry(radius * 0.98, radius > 110 ? 20 : 14), grassMaterial);
+  const top = new THREE.Mesh(createIslandTopGeometry(radius * 0.98, radius > 110 ? 22 : 16), grassMaterial);
   top.rotation.x = -Math.PI / 2;
   top.position.y = 0.65;
   top.receiveShadow = true;
   group.add(rock, top);
+
+  if (radius > 70) {
+    const spikeCount = state.quality === 'low' ? 3 : Math.min(7, Math.round(radius / 28));
+    for (let index = 0; index < spikeCount; index += 1) {
+      const spikeHeight = depth * range(0.18, 0.48);
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(radius * range(0.035, 0.075), spikeHeight, 7), rockMaterial);
+      const angle = range(0, Math.PI * 2);
+      const distance = range(radius * 0.2, radius * 0.72);
+      spike.position.set(Math.cos(angle) * distance, -depth * range(0.32, 0.64), Math.sin(angle) * distance);
+      spike.rotation.z = range(-0.16, 0.16);
+      group.add(spike);
+    }
+  }
 
   for (let index = 0; index < houses; index += 1) {
     const angle = range(0, Math.PI * 2);
@@ -641,9 +683,129 @@ function createWorldRegions() {
       trees: Math.floor(range(2, 10)),
     });
   }
-  createFloatingIsland({ position: new THREE.Vector3(0, 333, 0), radius: 210, depth: 150, biome: 'meadow', houses: 8, trees: 35 });
+  createFloatingIsland({ position: new THREE.Vector3(0, 333, 0), radius: 265, depth: 205, biome: 'meadow', houses: 10, trees: 44 });
+  createGrandSkyCity();
   createVegetationInstances();
   createWindmillsAndObservatories();
+}
+
+function createCityTower(x, z, height, width, roofMaterial, tier = 0) {
+  const tower = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(width * 0.78, width, height * 0.58, 10), tier % 3 === 0 ? materials.plasterWarm : materials.plaster);
+  base.position.y = height * 0.29;
+  const upper = new THREE.Mesh(new THREE.CylinderGeometry(width * 0.5, width * 0.68, height * 0.34, 10), tier % 2 ? materials.enamelCream : materials.plaster);
+  upper.position.y = height * 0.72;
+  const crown = new THREE.Mesh(new THREE.ConeGeometry(width * 0.66, height * 0.22, 10), roofMaterial);
+  crown.position.y = height;
+  tower.add(base, upper, crown);
+
+  const balcony = new THREE.Mesh(new THREE.TorusGeometry(width * 0.72, 0.42, 5, 20), materials.brass);
+  balcony.rotation.x = Math.PI / 2;
+  balcony.position.y = height * 0.58;
+  tower.add(balcony);
+  const windowRows = state.quality === 'low' ? 2 : 3;
+  for (let row = 0; row < windowRows; row += 1) {
+    for (let sideIndex = 0; sideIndex < 4; sideIndex += 1) {
+      const windowMesh = new THREE.Mesh(new THREE.BoxGeometry(width * 0.23, height * 0.08, 0.26), materials.window);
+      const angle = sideIndex * Math.PI * 0.5;
+      windowMesh.position.set(Math.sin(angle) * width * 0.78, height * (0.2 + row * 0.14), Math.cos(angle) * width * 0.78);
+      windowMesh.rotation.y = angle;
+      tower.add(windowMesh);
+    }
+  }
+  if (tier % 3 === 0) {
+    const chimney = new THREE.Mesh(new THREE.CylinderGeometry(width * 0.11, width * 0.16, height * 0.42, 8), materials.copper);
+    chimney.position.set(width * 0.36, height * 1.08, -width * 0.18);
+    tower.add(chimney);
+  }
+  tower.position.set(x, 334, z);
+  tower.traverse((child) => { if (child.isMesh) { child.castShadow = state.quality !== 'low'; child.receiveShadow = true; } });
+  worldGroups.buildings.add(tower);
+  return tower;
+}
+
+function createSuspendedSkyTransit() {
+  const transitPoints = [
+    new THREE.Vector3(-205, 397, -128), new THREE.Vector3(-106, 425, 34),
+    new THREE.Vector3(24, 418, 148), new THREE.Vector3(166, 390, 76),
+  ];
+  const transitCurve = new THREE.CatmullRomCurve3(transitPoints, false, 'catmullrom', 0.45);
+  const rail = new THREE.Mesh(new THREE.TubeGeometry(transitCurve, state.quality === 'low' ? 40 : 72, 0.72, 7, false), materials.brass);
+  rail.castShadow = state.quality !== 'low';
+  worldGroups.details.add(rail);
+  [0, 1].forEach((end) => {
+    const anchor = transitPoints[end ? transitPoints.length - 1 : 0];
+    const pylon = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 4.8, 68, 8), materials.paleStone);
+    pylon.position.copy(anchor).add(new THREE.Vector3(0, -33, 0));
+    worldGroups.details.add(pylon);
+  });
+  [0.16, 0.42, 0.68, 0.88].forEach((u, index) => {
+    const point = transitCurve.getPointAt(u);
+    const tangent = transitCurve.getTangentAt(u);
+    const cabin = new THREE.Group();
+    const hanger = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 10, 6), materials.rail);
+    hanger.position.y = -5;
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(3.8, 4.4, 4, 10), index % 2 ? materials.railwayOrange : materials.teal);
+    body.rotation.z = Math.PI / 2;
+    body.position.y = -11.5;
+    body.scale.y = 0.72;
+    const glass = new THREE.Mesh(new THREE.BoxGeometry(5.6, 2.2, 0.25), materials.window);
+    glass.position.set(0, -11.1, 3.05);
+    cabin.add(hanger, body, glass);
+    cabin.position.copy(point);
+    cabin.rotation.y = Math.atan2(tangent.x, tangent.z);
+    worldGroups.details.add(cabin);
+  });
+}
+
+function createReferenceAirship(position, scale, colorName = 'railwayOrange') {
+  const airship = new THREE.Group();
+  const hull = new THREE.Mesh(new THREE.SphereGeometry(1, 18, 10), materials[colorName]);
+  hull.scale.set(18 * scale, 6.5 * scale, 6.5 * scale);
+  const gondola = new THREE.Mesh(new THREE.CapsuleGeometry(2.1 * scale, 7 * scale, 4, 10), materials.inkBlue);
+  gondola.rotation.z = Math.PI / 2;
+  gondola.position.y = -6.2 * scale;
+  airship.add(hull, gondola);
+  [-8, 0, 8].forEach((x) => {
+    const rib = new THREE.Mesh(new THREE.TorusGeometry(6.55 * scale, 0.22 * scale, 5, 16), materials.brass);
+    rib.rotation.y = Math.PI / 2;
+    rib.position.x = x * scale;
+    airship.add(rib);
+  });
+  [-1, 1].forEach((side) => {
+    const fin = new THREE.Mesh(new THREE.ConeGeometry(3.6 * scale, 9 * scale, 3), materials.enamelCream);
+    fin.rotation.z = side * Math.PI / 2;
+    fin.position.set(10 * scale, side * 5.8 * scale, 0);
+    airship.add(fin);
+  });
+  airship.position.copy(position);
+  airship.rotation.y = range(-0.8, 0.8);
+  airship.userData.isAirship = true;
+  worldGroups.details.add(airship);
+}
+
+function createGrandSkyCity() {
+  const towerLayout = [
+    [-150, -90, 78, 16], [-112, 86, 105, 18], [-52, -146, 92, 15], [-8, 92, 132, 22],
+    [58, -122, 112, 18], [106, 34, 86, 15], [158, -54, 122, 19], [156, 126, 74, 14],
+    [-182, 36, 67, 13], [42, 166, 71, 14], [198, 54, 64, 12], [-80, 154, 79, 14],
+  ];
+  const count = state.quality === 'low' ? 8 : towerLayout.length;
+  towerLayout.slice(0, count).forEach(([x, z, height, width], index) => {
+    createCityTower(x, z, height, width, index % 3 === 0 ? materials.terracotta : index % 3 === 1 ? materials.teal : materials.copper, index);
+  });
+
+  const bridgeCurve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(-170, 372, 45), new THREE.Vector3(-82, 382, 72),
+    new THREE.Vector3(16, 378, 98), new THREE.Vector3(118, 369, 72),
+  ]);
+  const bridge = new THREE.Mesh(new THREE.TubeGeometry(bridgeCurve, 52, 2.4, 8, false), materials.paleStone);
+  bridge.castShadow = state.quality !== 'low';
+  worldGroups.details.add(bridge);
+  createSuspendedSkyTransit();
+  createReferenceAirship(new THREE.Vector3(-340, 520, -250), 1.1, 'railwayOrange');
+  createReferenceAirship(new THREE.Vector3(410, 585, 120), 0.72, 'teal');
+  if (state.quality !== 'low') createReferenceAirship(new THREE.Vector3(90, 690, -460), 0.48, 'enamelCream');
 }
 
 function createWindmillsAndObservatories() {
@@ -744,12 +906,12 @@ function createSkyMantas() {
 }
 
 const trainConfigs = [
-  { name: 'Celestial Express', routeIndex: 0, u: 0.08, maxSpeed: 32, color: 'red', accent: 'goldPaint', cars: 4, type: 'steam', horn: [116, 146], passengers: 184 },
-  { name: 'Azure Limited', routeIndex: 1, u: 0.2, maxSpeed: 39, color: 'navy', accent: 'brass', cars: 3, type: 'streamline', horn: [196, 247, 294], passengers: 126 },
-  { name: 'Forest Local', routeIndex: 0, u: 0.53, maxSpeed: 24, color: 'green', accent: 'terracotta', cars: 2, type: 'steam', horn: [440], passengers: 58 },
+  { name: 'Celestial Express', routeIndex: 0, u: 0.955, maxSpeed: 32, color: 'railwayOrange', accent: 'brass', cars: 4, type: 'steam', horn: [116, 146], passengers: 184 },
+  { name: 'Azure Limited', routeIndex: 1, u: 0.2, maxSpeed: 39, color: 'inkBlue', accent: 'brass', cars: 3, type: 'streamline', horn: [196, 247, 294], passengers: 126 },
+  { name: 'Forest Local', routeIndex: 0, u: 0.53, maxSpeed: 24, color: 'green', accent: 'copper', cars: 2, type: 'steam', horn: [440], passengers: 58 },
   { name: 'Moonlight Mail', routeIndex: 2, u: 0.74, maxSpeed: 30, color: 'purple', accent: 'brass', cars: 3, type: 'mail', horn: [98, 131], passengers: 34 },
-  { name: 'Cloud Freight', routeIndex: 2, u: 0.16, maxSpeed: 22, color: 'green', accent: 'darkWood', cars: 5, type: 'freight', horn: [82, 103], passengers: 2 },
-  { name: 'Sky Tram', routeIndex: 1, u: 0.58, maxSpeed: 27, color: 'teal', accent: 'plasterWarm', cars: 1, type: 'tram', horn: [523, 659], passengers: 42 },
+  { name: 'Cloud Freight', routeIndex: 2, u: 0.16, maxSpeed: 22, color: 'copper', accent: 'darkWood', cars: 5, type: 'freight', horn: [82, 103], passengers: 2 },
+  { name: 'Sky Tram', routeIndex: 1, u: 0.58, maxSpeed: 27, color: 'railwayOrange', accent: 'enamelCream', cars: 1, type: 'tram', horn: [523, 659], passengers: 42 },
 ];
 
 function createWheel(radius = 1.35, width = 0.65, colorMaterialRef = materials.rail) {
@@ -765,7 +927,56 @@ function addWheelSet(root, wheels, z, radius = 1.35) {
     wheel.position.set(x, radius, z);
     root.add(wheel);
     wheels.push(wheel);
+    const hub = createWheel(radius * 0.35, 0.72, materials.brass);
+    hub.position.set(x * 1.01, radius, z);
+    root.add(hub);
+    wheels.push(hub);
   });
+}
+
+function createRoundedRailBody(length, width, height, material) {
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(width * 0.5, Math.max(1, length - width), 5, 14), material);
+  body.rotation.x = Math.PI / 2;
+  body.scale.y = height / width;
+  return body;
+}
+
+function addBodyRibs(root, zPositions, width, centerY, material = materials.brass) {
+  zPositions.forEach((z) => {
+    const arch = new THREE.Mesh(new THREE.TorusGeometry(width * 0.51, 0.11, 5, 18, Math.PI), material);
+    arch.position.set(0, centerY, z);
+    root.add(arch);
+    [-1, 1].forEach((side) => {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.14, 2.8, 0.18), material);
+      post.position.set(side * width * 0.505, centerY - 1.35, z);
+      root.add(post);
+    });
+  });
+}
+
+function addSideWindowBand(root, width, y, zPositions, scale = 1) {
+  [-1, 1].forEach((side) => {
+    const waist = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.28, Math.max(5, (zPositions.length + 0.4) * 2.25)), materials.brass);
+    waist.position.set(side * width * 0.505, y - 1.25, 0);
+    root.add(waist);
+    zPositions.forEach((z) => {
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.9 * scale, 1.8 * scale), materials.brass);
+      frame.position.set(side * width * 0.51, y, z);
+      const glass = new THREE.Mesh(new THREE.BoxGeometry(0.24, 1.5 * scale, 1.4 * scale), materials.window);
+      glass.position.set(side * width * 0.52, y, z);
+      root.add(frame, glass);
+    });
+  });
+}
+
+function addRivetLine(root, x, y, zFrom, zTo, count) {
+  if (state.quality === 'low') return;
+  const geometry = new THREE.SphereGeometry(0.13, 6, 4);
+  for (let index = 0; index < count; index += 1) {
+    const rivet = new THREE.Mesh(geometry, materials.brass);
+    rivet.position.set(x, y, lerp(zFrom, zTo, index / Math.max(1, count - 1)));
+    root.add(rivet);
+  }
 }
 
 function createLocomotive(config) {
@@ -773,58 +984,84 @@ function createLocomotive(config) {
   const wheels = [];
   const primary = materials[config.color];
   const accent = materials[config.accent];
-  const undercarriage = new THREE.Mesh(new THREE.BoxGeometry(5.3, 1.25, 14.5), materials.signalDark);
+  const undercarriage = new THREE.Mesh(new THREE.BoxGeometry(5.5, 1.25, 16.4), materials.signalDark);
   undercarriage.position.y = 1.85;
   root.add(undercarriage);
 
   if (config.type === 'steam' || config.type === 'freight') {
-    const boiler = new THREE.Mesh(new THREE.CylinderGeometry(config.type === 'freight' ? 2.25 : 2, config.type === 'freight' ? 2.25 : 2, 9, 16), primary);
+    const boilerRadius = config.type === 'freight' ? 2.48 : 2.32;
+    const boiler = new THREE.Mesh(new THREE.CylinderGeometry(boilerRadius, boilerRadius * 1.06, 10.8, 20), primary);
     boiler.rotation.x = Math.PI / 2;
-    boiler.position.set(0, 4.2, 0.5);
-    const cab = new THREE.Mesh(new THREE.BoxGeometry(5.1, 5.6, 4.6), accent);
-    cab.position.set(0, 4.7, 5.2);
-    const cabRoof = new THREE.Mesh(new THREE.CylinderGeometry(3.4, 3.4, 5.7, 10, 1, false, 0, Math.PI), primary);
-    cabRoof.rotation.set(0, 0, Math.PI / 2);
-    cabRoof.position.set(0, 7.55, 5.2);
-    const chimney = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.85, 3.6, 10), materials.signalDark);
-    chimney.position.set(0, 7.05, -2.5);
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.85, 10, 7), materials.brass);
-    dome.position.set(0, 6.15, 1.1);
-    root.add(boiler, cab, cabRoof, chimney, dome);
+    boiler.position.set(0, 4.5, -1.1);
+    const smokeBox = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), primary);
+    smokeBox.scale.set(boilerRadius * 1.03, boilerRadius * 1.03, 1.9);
+    smokeBox.position.set(0, 4.5, -6.35);
+    const cab = new THREE.Mesh(new THREE.CapsuleGeometry(2.55, 2.6, 5, 14), accent);
+    cab.scale.z = 0.92;
+    cab.position.set(0, 4.75, 5.1);
+    const cabRoof = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), primary);
+    cabRoof.scale.set(3.15, 1.05, 2.8);
+    cabRoof.position.set(0, 7.55, 5.1);
+    const chimney = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.96, 4.2, 12), materials.signalDark);
+    chimney.position.set(0, 7.45, -3.6);
+    const chimneyCrown = new THREE.Mesh(new THREE.CylinderGeometry(0.92, 0.72, 0.7, 12), materials.copper);
+    chimneyCrown.position.set(0, 9.55, -3.6);
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.92, 12, 8), materials.brass);
+    dome.scale.y = 1.35;
+    dome.position.set(0, 6.6, 0.4);
+    root.add(boiler, smokeBox, cab, cabRoof, chimney, chimneyCrown, dome);
+    [-4.2, -1.2, 1.8].forEach((z) => {
+      const band = new THREE.Mesh(new THREE.TorusGeometry(boilerRadius * 1.02, 0.13, 6, 18), materials.brass);
+      band.position.set(0, 4.5, z);
+      root.add(band);
+    });
+    [-1, 1].forEach((side) => {
+      const sideTank = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), config.type === 'freight' ? materials.darkWood : primary);
+      sideTank.scale.set(0.7, 1.35, 3.8);
+      sideTank.position.set(side * 2.45, 3.75, -0.3);
+      root.add(sideTank);
+    });
+    addRivetLine(root, 2.44, 5.2, -4.8, 3.2, 8);
   } else if (config.type === 'streamline') {
-    const body = new THREE.Mesh(new THREE.CapsuleGeometry(2.55, 9, 5, 12), primary);
-    body.rotation.x = Math.PI / 2;
-    body.position.y = 4.25;
-    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.5, 3.6, 5), accent);
-    fin.position.set(0, 6.7, 3.5);
-    root.add(body, fin);
+    const body = createRoundedRailBody(17.2, 5.5, 5.3, primary);
+    body.position.y = 4.55;
+    const nose = new THREE.Mesh(new THREE.SphereGeometry(1, 18, 10), primary);
+    nose.scale.set(2.76, 2.45, 3.9);
+    nose.position.set(0, 4.45, -7.25);
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.45, 3.8, 5.6), accent);
+    fin.position.set(0, 7.2, 3.25);
+    fin.rotation.x = -0.1;
+    root.add(body, nose, fin);
+    addBodyRibs(root, [-5.7, -2.4, 0.9, 4.2], 5.5, 4.55, accent);
+    addSideWindowBand(root, 5.5, 5.15, [-1.4, 1.25, 3.9], 0.82);
   } else if (config.type === 'mail') {
-    const nose = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 2.55, 5, 12), primary);
-    nose.rotation.x = Math.PI / 2;
-    nose.position.set(0, 4.3, -4.7);
-    const body = new THREE.Mesh(new THREE.BoxGeometry(5.1, 5.6, 10), primary);
-    body.position.set(0, 4.4, 2.3);
-    const roof = new THREE.Mesh(new THREE.CylinderGeometry(3.1, 3.1, 10.5, 12, 1, false, 0, Math.PI), accent);
-    roof.rotation.set(0, 0, Math.PI / 2);
-    roof.position.set(0, 7.2, 2.3);
-    root.add(nose, body, roof);
+    const body = createRoundedRailBody(16.5, 5.35, 5.4, primary);
+    body.position.y = 4.55;
+    const mailCrown = new THREE.Mesh(new THREE.CapsuleGeometry(1.25, 5.5, 4, 10), accent);
+    mailCrown.rotation.x = Math.PI / 2;
+    mailCrown.position.set(0, 7.2, 1.5);
+    mailCrown.scale.y = 0.58;
+    root.add(body, mailCrown);
+    addBodyRibs(root, [-5.2, -1.8, 1.6, 5], 5.35, 4.55, accent);
+    addSideWindowBand(root, 5.35, 5.2, [-2.5, 0.2, 2.9], 0.86);
   } else {
-    const body = new THREE.Mesh(new THREE.BoxGeometry(5.2, 5.8, 13), primary);
-    body.position.y = 4.4;
-    const roof = new THREE.Mesh(new THREE.CylinderGeometry(3.15, 3.15, 13.4, 12, 1, false, 0, Math.PI), accent);
-    roof.rotation.set(0, 0, Math.PI / 2);
-    roof.position.y = 7.35;
-    root.add(body, roof);
+    const body = createRoundedRailBody(15.5, 5.35, 5.6, primary);
+    body.position.y = 4.6;
+    const brow = new THREE.Mesh(new THREE.BoxGeometry(5.7, 0.45, 1.1), accent);
+    brow.position.set(0, 6.45, -6.65);
+    root.add(body, brow);
+    addBodyRibs(root, [-5.5, -1.9, 1.8, 5.4], 5.35, 4.6, accent);
+    addSideWindowBand(root, 5.35, 5.2, [-3.2, 0, 3.2], 0.98);
   }
 
-  for (let z = -5; z <= 5; z += 5) addWheelSet(root, wheels, z, config.type === 'freight' ? 1.5 : 1.3);
+  for (let z = -5.5; z <= 5.5; z += 5.5) addWheelSet(root, wheels, z, config.type === 'freight' ? 1.5 : 1.32);
   const buffer = new THREE.Mesh(new THREE.BoxGeometry(5.8, 0.5, 0.7), materials.brass);
-  buffer.position.set(0, 2.1, -7.35);
+  buffer.position.set(0, 2.1, -8.25);
   const headlight = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.9, 0.75, 12), materials.window);
   headlight.rotation.x = Math.PI / 2;
-  headlight.position.set(0, 5.1, -6.8);
+  headlight.position.set(0, 5.1, -8.05);
   const windowLeft = new THREE.Mesh(new THREE.BoxGeometry(1.45, 1.45, 0.22), materials.window);
-  windowLeft.position.set(-1.35, 5.4, config.type === 'steam' || config.type === 'freight' ? 7.55 : -6.58);
+  windowLeft.position.set(-1.35, 5.55, config.type === 'steam' || config.type === 'freight' ? 7.45 : -7.72);
   const windowRight = windowLeft.clone();
   windowRight.position.x = 1.35;
   root.add(buffer, headlight, windowLeft, windowRight);
@@ -838,22 +1075,20 @@ function createPassengerCar(config, carIndex) {
   const wheels = [];
   const freight = config.type === 'freight';
   const mail = config.type === 'mail';
-  const bodyMaterial = freight ? (carIndex % 2 ? materials.darkWood : materials.green) : mail ? materials.purple : carIndex % 2 ? materials[config.color] : materials.plasterWarm;
-  const body = new THREE.Mesh(new THREE.BoxGeometry(5.25, freight ? 4.7 : 5.4, 12.5), bodyMaterial);
-  body.position.y = freight ? 4 : 4.35;
-  root.add(body);
+  const bodyMaterial = freight ? (carIndex % 2 ? materials.darkWood : materials.copper) : mail ? materials.purple : materials[config.color];
+  const body = createRoundedRailBody(14.2, 5.3, freight ? 4.5 : 5.2, bodyMaterial);
+  body.position.y = freight ? 4.05 : 4.45;
+  const lowerSkirt = new THREE.Mesh(new THREE.BoxGeometry(5.45, 1.15, 12.9), freight ? materials.signalDark : materials[config.accent]);
+  lowerSkirt.position.y = 2.25;
+  root.add(lowerSkirt, body);
   if (!freight) {
-    const roof = new THREE.Mesh(new THREE.CylinderGeometry(3.15, 3.15, 12.8, 12, 1, false, 0, Math.PI), materials[config.accent]);
-    roof.rotation.set(0, 0, Math.PI / 2);
-    roof.position.y = 7.1;
-    root.add(roof);
-    for (let windowIndex = -2; windowIndex <= 2; windowIndex += 1) {
-      [-1, 1].forEach((side) => {
-        const windowMesh = new THREE.Mesh(new THREE.BoxGeometry(0.23, 1.45, 1.45), materials.window);
-        windowMesh.position.set(side * 2.66, 5.1, windowIndex * 2.25);
-        root.add(windowMesh);
-      });
-    }
+    addBodyRibs(root, [-5.5, -2.8, 0, 2.8, 5.5], 5.3, 4.45, materials[config.accent]);
+    addSideWindowBand(root, 5.3, 5.05, [-4.4, -2.2, 0, 2.2, 4.4], 0.82);
+    const roofVent = new THREE.Mesh(new THREE.CapsuleGeometry(0.52, 4.8, 3, 8), materials.copper);
+    roofVent.rotation.x = Math.PI / 2;
+    roofVent.position.y = 7.15;
+    roofVent.scale.y = 0.6;
+    root.add(roofVent);
   } else {
     const braceMaterial = carIndex % 2 ? materials.brass : materials.darkWood;
     for (let braceIndex = -2; braceIndex <= 2; braceIndex += 1) {
@@ -861,6 +1096,7 @@ function createPassengerCar(config, carIndex) {
       brace.position.set(0, 4.1, braceIndex * 2.3);
       root.add(brace);
     }
+    addRivetLine(root, 2.66, 5.3, -5.2, 5.2, 9);
   }
   addWheelSet(root, wheels, -4.2, 1.12);
   addWheelSet(root, wheels, 4.2, 1.12);
@@ -1229,9 +1465,9 @@ function cameraCompositionForMode(train) {
   if (mode === 0) {
     const rearPart = train.parts[train.parts.length - 1];
     const rearPose = getPartPose(train, rearPart.offset + 7);
-    const distance = 48 + speedFactor * 15;
-    desiredCameraPosition.copy(rearPose.position).addScaledVector(forward, -distance).addScaledVector(side, 22).add(new THREE.Vector3(0, 31 + speedFactor * 8, 0));
-    desiredCameraLookAt.copy(position).addScaledVector(forward, 25).add(new THREE.Vector3(0, 5, 0));
+    const distance = 32 + speedFactor * 11;
+    desiredCameraPosition.copy(rearPose.position).addScaledVector(forward, -distance).addScaledVector(side, 39).add(new THREE.Vector3(0, 22 + speedFactor * 6, 0));
+    desiredCameraLookAt.copy(position).addScaledVector(forward, 18).add(new THREE.Vector3(0, 4.5, 0));
   } else if (mode === 1) {
     desiredCameraPosition.copy(localPointToWorld(locomotive, 0, 6.25, -8.6));
     desiredCameraLookAt.copy(desiredCameraPosition).addScaledVector(forward, 90).add(new THREE.Vector3(0, 1, 0));
@@ -1588,12 +1824,13 @@ function initializeRenderer() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, qualityProfiles[state.quality].pixelRatio));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = 1.14;
   renderer.shadowMap.enabled = qualityProfiles[state.quality].shadows;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   dom.world.appendChild(renderer.domElement);
 
-  hemisphere = new THREE.HemisphereLight(0xfff4d1, 0x47666c, 1.05);
+  hemisphere = new THREE.HemisphereLight(0xfff4d1, 0x665b55, 1.12);
+  const painterlyFill = new THREE.AmbientLight(0xffd9b5, 0.28);
   sun = new THREE.DirectionalLight(0xffe0aa, 1.45);
   sun.position.set(-900, 1200, -500);
   sun.castShadow = qualityProfiles[state.quality].shadows;
@@ -1605,7 +1842,7 @@ function initializeRenderer() {
   sun.shadow.camera.near = 20;
   sun.shadow.camera.far = 3000;
   sun.shadow.bias = -0.0003;
-  scene.add(hemisphere, sun);
+  scene.add(hemisphere, painterlyFill, sun);
   Object.values(worldGroups).forEach((group) => scene.add(group));
   clock = new THREE.Clock();
 }

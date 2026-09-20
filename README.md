@@ -1,5 +1,7 @@
 # Cloud Junction — The Celestial Railway
 
+Visual development follows the project’s committed reference images and the shape-language rules in [ART_DIRECTION.md](./ART_DIRECTION.md). New world or rolling-stock work should preserve that contract.
+
 An original, playable 3D fantasy railway journey built with Three.js and Vite. The world, trains, track geometry, islands, weather, audio, map, and creatures are generated in code; there are no external runtime assets or CDN dependencies.
 
 ## Run locally
