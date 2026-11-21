@@ -7,7 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "check": "eslint src/main.js tests/*.js",
+    "check": "eslint src/*.js tests/*.js",
     "test:e2e": "playwright test"
   },
   "dependencies": {

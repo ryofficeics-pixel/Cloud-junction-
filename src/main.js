@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import './styles.css';
+import { createSkyLife, isNearWhaleRoute } from './life.js';
 
 window.__CJ_MODULE_READY__ = true;
 clearTimeout(window.__CJ_WATCHDOG__);
@@ -59,6 +60,8 @@ let signals = [];
 let stations = [];
 let aurelion;
 let audioSystem;
+let skyLife;
+const platformRecords = [];
 let activeHorn;
 
 const worldGroups = {
@@ -693,6 +696,16 @@ function auditRailwayClearance() {
       });
     }
   }
+  // Sky whale routes must miss every island and stay well clear of the railway.
+  (skyLife?.whales || []).forEach((whale, whaleIndex) => {
+    whale.curve.getSpacedPoints(400).forEach((point) => {
+      islandRecords.forEach((island) => {
+        const horizontal = Math.hypot(point.x - island.x, point.z - island.z);
+        if (horizontal < island.radius + 25 && point.y < island.y + 25 && point.y > island.y - island.depth - 25) problems.push(`whale ${whaleIndex} hits island ${island.landmark || `@${Math.round(island.x)},${Math.round(island.z)}`}`);
+      });
+      if (horizontalTrackDistance(point.x, point.y, point.z, 30, 60) < 40) problems.push(`whale ${whaleIndex} brushes the railway near ${Math.round(point.x)},${Math.round(point.z)}`);
+    });
+  });
   return problems;
 }
 
@@ -700,7 +713,7 @@ function createFloatingIsland(options) {
   const { position, radius = 70, depth = radius * 0.9, biome = 'meadow', houses = 1, trees = 10, landmark = '' } = options;
   const group = new THREE.Group();
   group.position.copy(position);
-  islandRecords.push({ x: position.x, y: position.y, z: position.z, radius, depth, landmark });
+  islandRecords.push({ x: position.x, y: position.y, z: position.z, radius, depth, landmark, biome, hub: Boolean(options.hub) });
   const rockMaterial = biome === 'frost' ? materials.rockCold : biome === 'mango' ? materials.rockWarm : materials.rock;
   const grassMaterial = biome === 'frost' ? materials.frostGrass : biome === 'mango' ? materials.mangoGrass : biome === 'storm' ? materials.stormGrass : biome === 'garden' ? materials.gardenGrass : materials.grass;
   const rock = new THREE.Mesh(createIslandGeometry(radius, depth, radius > 200 ? 28 : radius > 110 ? 20 : 15), [rockMaterial, grassMaterial]);
@@ -853,6 +866,10 @@ function createStation(routeIndex, u, name, size = 'small', biome = 'meadow') {
   platform.quaternion.copy(trackQuaternion(trackFrame));
   platform.receiveShadow = true;
   worldGroups.buildings.add(platform);
+  platformRecords.push({
+    center: platform.position.clone(), tangent: trackFrame.tangent.clone().setY(0).normalize(), toward: trackFrame.right.clone().setY(0).normalize(),
+    length: platformLength, width: size === 'grand' ? 30 : 14, top: platform.position.y + 0.65, grand: size === 'grand',
+  });
   // Station local +X points away from the platform towards the track; buildings sit on the far (negative) side.
   const building = createHouse(size === 'grand' ? 1.45 : 0.86, biome === 'frost' ? 'navy' : 'teal', true);
   const buildingX = size === 'grand' ? -34 : -15;
@@ -961,6 +978,7 @@ function createHubPlatformRoad() {
   islandPlatform.position.set(0, y - 0.42, lateral - 8.6);
   islandPlatform.receiveShadow = true;
   worldGroups.buildings.add(islandPlatform);
+  platformRecords.push({ center: islandPlatform.position.clone(), tangent: new THREE.Vector3(1, 0, 0), toward: new THREE.Vector3(0, 0, 1), length: 150, width: 9, top: islandPlatform.position.y + 0.65, grand: true });
   [-45, 0, 45].forEach((x) => {
     const bench = new THREE.Mesh(new THREE.BoxGeometry(5, 0.9, 1.2), materials.darkWood);
     bench.position.set(x, y + 0.7, lateral - 10.5);
@@ -1005,7 +1023,7 @@ function createWorldRegions() {
       const distance = range(700, 2500);
       const candidate = new THREE.Vector3(Math.cos(angle) * distance, range(180, 670), Math.sin(angle) * distance);
       const clear = horizontalTrackDistance(candidate.x, candidate.y - depth * 0.4, candidate.z, depth * 0.6 + 70, radius + 90) > radius + 60;
-      if (clear) position = candidate;
+      if (clear && !isNearWhaleRoute(candidate, radius + depth + 80)) position = candidate;
     }
     if (!position) continue;
     const biomeOptions = ['meadow', 'garden', 'mango', 'pine'];
@@ -1015,7 +1033,7 @@ function createWorldRegions() {
       trees: Math.floor(range(2, 10)),
     });
   }
-  createFloatingIsland({ position: new THREE.Vector3(0, HUB_GROUND_Y - 0.2, 0), radius: 265, depth: 205, biome: 'meadow', houses: 10, trees: 44 });
+  createFloatingIsland({ hub: true, position: new THREE.Vector3(0, HUB_GROUND_Y - 0.2, 0), radius: 265, depth: 205, biome: 'meadow', houses: 10, trees: 44 });
   createGrandSkyCity();
   createVegetationInstances();
   createWindmillsAndObservatories();
@@ -1236,26 +1254,6 @@ function createAurelion() {
   creature.userData = { body, wings, tail, eventStrength: 0 };
   worldGroups.creatures.add(creature);
   aurelion = creature;
-  createSkyMantas();
-}
-
-function createSkyMantas() {
-  for (let index = 0; index < 5; index += 1) {
-    const manta = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 6), colorMaterial(index % 2 ? 0x557c88 : 0x778ea2, { flatShading: true }));
-    body.scale.set(7, 1.4, 4.2);
-    const leftWing = new THREE.Mesh(new THREE.ConeGeometry(4, 12, 3), materials.teal);
-    leftWing.rotation.z = Math.PI / 2;
-    leftWing.position.x = -7;
-    const rightWing = leftWing.clone();
-    rightWing.rotation.z = -Math.PI / 2;
-    rightWing.position.x = 7;
-    manta.add(body, leftWing, rightWing);
-    manta.position.set(range(-1600, 1600), range(360, 800), range(-1600, 1600));
-    manta.scale.setScalar(range(0.8, 1.8));
-    manta.userData.phase = range(0, Math.PI * 2);
-    worldGroups.creatures.add(manta);
-  }
 }
 
 const trainConfigs = [
@@ -2016,6 +2014,12 @@ function resolveCameraOcclusion(target, cameraPosition) {
 }
 
 function updateCamera(delta) {
+  if (state.debugCamera) {
+    const { position, target } = typeof state.debugCamera === 'function' ? state.debugCamera() : state.debugCamera;
+    camera.position.copy(position);
+    camera.lookAt(target);
+    return;
+  }
   const train = selectedTrain();
   cameraCompositionForMode(train);
   const attached = state.cameraMode === 1 || state.cameraMode === 2;
@@ -2092,11 +2096,6 @@ function updateCreatures(delta) {
   }
   aurelion.userData.wings.forEach((wing, index) => { wing.rotation.z += Math.sin(state.elapsed * 1.2 + index) * delta * 0.1; });
   aurelion.userData.tail.forEach((segment, index) => { segment.position.y = Math.sin(state.elapsed * 0.8 - index * 0.5) * (1 + index * 0.38); segment.position.z = Math.sin(state.elapsed * 0.55 - index * 0.4) * index * 0.7; });
-  worldGroups.creatures.children.forEach((creature, index) => {
-    if (creature === aurelion) return;
-    creature.position.y += Math.sin(state.elapsed * 0.7 + creature.userData.phase) * delta * 0.9;
-    creature.rotation.y += delta * (0.03 + index * 0.002);
-  });
   worldGroups.details.traverse((object) => { if (object.userData.isWindmill) object.rotation.z -= delta * 0.24; });
 }
 
@@ -2497,6 +2496,10 @@ async function initialize() {
   await yieldFrame();
   setProgress(85, 'Awakening the Aurelion…');
   createAurelion();
+  skyLife = createSkyLife({
+    scene, quality: state.quality, islands: islandRecords, platforms: platformRecords, occluders: cameraOccluders,
+    trackDistance: horizontalTrackDistance, getNight: () => starField.material.opacity,
+  });
   createWeatherSystem();
   applyWeather('clear');
   await yieldFrame();
@@ -2516,9 +2519,14 @@ async function initialize() {
   if (import.meta.env.DEV) {
     const problems = auditRailwayClearance();
     window.__CJ_RAIL_AUDIT__ = problems;
-    window.__CJ_DEBUG__ = { trains, stations, state };
+    window.__CJ_DEBUG__ = { trains, stations, state, skyLife, THREE, platforms: platformRecords };
+    window.__CJ_LIFE__ = skyLife.counts;
     if (problems.length) console.warn(`Railway clearance: ${problems.length} problems`, problems.slice(0, 20));
   }
+}
+
+function trainNearPoint(point, radius) {
+  return trains.some((train) => train.speed > 2 && train.parts[0].root.position.distanceToSquared(point) < radius * radius);
 }
 
 function animate() {
@@ -2533,6 +2541,7 @@ function animate() {
   }
   if (cloudInstances) cloudInstances.rotation.y += delta * 0.0015;
   if (aurelion) updateCreatures(delta);
+  if (skyLife) skyLife.update(delta, state.elapsed, camera.position, trainNearPoint);
   updateTimeOfDay(delta);
   updateWeather(delta);
   updateCamera(delta || 0.016);
