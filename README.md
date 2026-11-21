@@ -46,6 +46,7 @@ Touch controls expose the same functions on mobile. Graphics automatically defau
 - In development (`npm run dev`) a railway clearance audit warns in the console if any line cuts through an island or meets another line
 - Simplified block occupancy, signal aspects, collision spacing, station stops, acceleration, braking, grades, and curve speed limits
 - Eight camera modes, live network map, destination selection, day/night cycle, five weather modes, and procedural Web Audio
+- Living world (`src/life.js`): villagers wandering the islands, passengers waiting on platforms who wave at passing trains, grazing sheep, bird flocks, hang-glider pilots riding thermals, winged sky folk, manta rays, and sky whales (a migrating giant, a mother and calf swimming through the cloud sea, and a pod circling the junction)
 - Procedural floating islands, settlements, region stations, layered cloud ocean, instanced vegetation, bridges, waterfalls, and original sky creatures
 
 Vercel configuration is included. Deploying the repository builds `dist/` with `npm run build`.
