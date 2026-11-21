@@ -15,6 +15,8 @@ The seven reference images committed on 20 September 2026 are the visual source 
 
 The normal chase view must retain a three-quarter view of the selected train and show its window band. It should also reveal curved track, cloud depth, and at least one reachable landmark. A city or island can frame the foreground, but it must not permanently hide the train or railway.
 
+Scenery must respect the railway: city towers, houses and station buildings are placed using the track spatial index (`horizontalTrackDistance`) and registered as camera occluders (`registerOccluder`) so framed cameras swing or rise around them instead of clipping through walls.
+
 ## Guardrails
 
 - Keep the palette warm and painterly; reserve pure black for underframes and deep mechanical recesses.

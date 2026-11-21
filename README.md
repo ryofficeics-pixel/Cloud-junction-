@@ -19,6 +19,12 @@ npm run build
 npm run test:e2e
 ```
 
+If Playwright's bundled browser is unavailable (e.g. sandboxed CI with a preinstalled Chromium), point the tests at it:
+
+```bash
+PW_CHROMIUM_PATH=/path/to/chromium npm run test:e2e
+```
+
 ## Controls
 
 - `W` / `S`: adjust power
@@ -26,6 +32,7 @@ npm run test:e2e
 - `C`: change camera
 - `H`: horn
 - `M`: route map
+- `Esc`: close map / settings
 - Drag: orbit camera
 - Mouse wheel: orbit zoom
 

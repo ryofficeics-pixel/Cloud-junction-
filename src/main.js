@@ -16,26 +16,27 @@ const dom = {
   reverseButton: $('reverseButton'), autoButton: $('autoButton'), switchButton: $('switchButton'), switchLabel: $('switchLabel'),
   hornButton: $('hornButton'), mapPanel: $('mapPanel'), settingsPanel: $('settingsPanel'), routeMap: $('routeMap'),
   destinationList: $('destinationList'), quality: $('qualitySelect'), weather: $('weatherSelect'), time: $('timeSelect'),
-  cinematic: $('cinematicToggle'), audio: $('audioToggle'), eventBanner: $('eventBanner'), eventTitle: $('eventTitle'),
+  cinematic: $('cinematicToggle'), audio: $('audioToggle'), eventBanner: $('eventBanner'), eventTitle: $('eventTitle'), eventLabel: $('eventLabel'),
 };
 
 const isMobile = matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad/i.test(navigator.userAgent);
 const weakDevice = (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) || (navigator.deviceMemory && navigator.deviceMemory <= 4);
 const initialQuality = isMobile ? (weakDevice ? 'low' : 'medium') : 'high';
 const qualityProfiles = {
-  low: { pixelRatio: 1, shadows: false, shadowSize: 512, cloudLobes: 130, farIslands: 9, treeLimit: 220, trackSegments: 360, weatherParticles: 260, drawDistance: 3600 },
-  medium: { pixelRatio: 1.3, shadows: true, shadowSize: 768, cloudLobes: 240, farIslands: 15, treeLimit: 420, trackSegments: 520, weatherParticles: 520, drawDistance: 4700 },
-  high: { pixelRatio: 1.65, shadows: true, shadowSize: 1024, cloudLobes: 390, farIslands: 24, treeLimit: 720, trackSegments: 720, weatherParticles: 850, drawDistance: 6200 },
+  low: { pixelRatio: 1, shadows: false, shadowSize: 512, cloudLobes: 130, farIslands: 9, treeLimit: 220, trackSegments: 360, weatherParticles: 260, drawDistance: 5200 },
+  medium: { pixelRatio: 1.3, shadows: true, shadowSize: 1024, cloudLobes: 240, farIslands: 15, treeLimit: 420, trackSegments: 520, weatherParticles: 520, drawDistance: 6200 },
+  high: { pixelRatio: 1.65, shadows: true, shadowSize: 2048, cloudLobes: 390, farIslands: 24, treeLimit: 720, trackSegments: 720, weatherParticles: 850, drawDistance: 7200 },
 };
 
 const cameraModes = ['CHASE', 'LOCOMOTIVE POV', 'PASSENGER WINDOW', 'SIDE CINEMATIC', 'ORBIT', "BIRD'S-EYE", 'MAP', 'SKY CINEMATIC'];
+const cameraShortLabels = ['CHASE', 'CAB', 'WINDOW', 'SIDE', 'ORBIT', 'AERIAL', 'MAP', 'SKY'];
 const routeNames = ['MEADOW LINE', 'CROWN LINE', 'TEMPEST LINE'];
 
 const state = {
   quality: initialQuality, started: false, paused: false, selectedTrain: 0, cameraMode: 0, orbitYaw: Math.PI, orbitPitch: 0.26,
   orbitDistance: 56, dragging: false, pointerX: 0, pointerY: 0, weather: 'clear', timeMode: 'cycle', timeOfDay: 0.66,
-  cinematics: true, audioEnabled: true, pendingRoute: 0, lastFrame: performance.now(), elapsed: 0, frames: 0, fpsTime: 0,
-  mapOpen: false, settingsOpen: false, lastScenicKey: '', eventTimer: 0, cameraShake: 0,
+  cinematics: true, audioEnabled: true, pendingRoute: 0, lastFrame: performance.now(), elapsed: 0, frames: 0, fpsFrames: 0, fpsTime: 0,
+  mapOpen: false, settingsOpen: false, lastScenicKey: '', eventTimer: 0, cameraShake: 0, lightning: 0, bannerTimeout: 0,
 };
 
 let renderer;
@@ -45,6 +46,7 @@ let clock;
 let sun;
 let hemisphere;
 let skyMaterial;
+let skyDome;
 let starField;
 let cloudOcean;
 let cloudInstances;
@@ -106,7 +108,7 @@ const materials = {};
 function createMaterials() {
   Object.assign(materials, {
     rail: colorMaterial(0x4c5658, { roughness: 0.3, metalness: 0.74 }), railTop: colorMaterial(0xa5b2ad, { roughness: 0.2, metalness: 0.84 }),
-    sleeper: colorMaterial(0x60412e, { roughness: 0.96 }), darkWood: colorMaterial(0x3f3028), brass: colorMaterial(0xc79a48, { roughness: 0.34, metalness: 0.63 }),
+    sleeper: colorMaterial(0x60412e, { roughness: 0.96 }), deck: colorMaterial(0x7a5a45, { roughness: 0.9, flatShading: true }), darkWood: colorMaterial(0x3f3028), brass: colorMaterial(0xc79a48, { roughness: 0.34, metalness: 0.63 }),
     stone: colorMaterial(0x717b72, { flatShading: true }), paleStone: colorMaterial(0xa6a690, { flatShading: true }), ballast: colorMaterial(0x6f675a, { roughness: 1, flatShading: true }),
     rock: colorMaterial(0x687268, { flatShading: true }), rockWarm: colorMaterial(0x816f5e, { flatShading: true }), rockCold: colorMaterial(0x74818b, { flatShading: true }),
     grass: colorMaterial(0x779957, { flatShading: true }), gardenGrass: colorMaterial(0x68a36a, { flatShading: true }), mangoGrass: colorMaterial(0xb5954f, { flatShading: true }),
@@ -202,6 +204,81 @@ function poseOnRoute(routeIndex, u, lateral = 0, vertical = 0) {
   return { position, tangent, side };
 }
 
+// Horizontal spatial hash of track centreline samples, used to keep scenery and cameras clear of the railway.
+const trackIndex = { cell: 40, buckets: new Map() };
+function buildTrackIndex() {
+  trackIndex.buckets.clear();
+  routes.forEach((route) => {
+    const count = Math.ceil(route.length / 4);
+    for (let index = 0; index <= count; index += 1) {
+      const point = route.curve.getPointAt(index / count);
+      const key = `${Math.floor(point.x / trackIndex.cell)},${Math.floor(point.z / trackIndex.cell)}`;
+      if (!trackIndex.buckets.has(key)) trackIndex.buckets.set(key, []);
+      trackIndex.buckets.get(key).push(point);
+    }
+  });
+}
+
+function horizontalTrackDistance(x, y, z, verticalWindow = 45, searchRadius = 80) {
+  const span = Math.ceil(searchRadius / trackIndex.cell);
+  const cellX = Math.floor(x / trackIndex.cell);
+  const cellZ = Math.floor(z / trackIndex.cell);
+  let nearest = Infinity;
+  for (let dx = -span; dx <= span; dx += 1) {
+    for (let dz = -span; dz <= span; dz += 1) {
+      const bucket = trackIndex.buckets.get(`${cellX + dx},${cellZ + dz}`);
+      if (!bucket) continue;
+      for (const point of bucket) {
+        if (Math.abs(point.y - y) > verticalWindow) continue;
+        nearest = Math.min(nearest, Math.hypot(point.x - x, point.z - z));
+      }
+    }
+  }
+  return nearest;
+}
+
+// Vertical cylinders that the camera must not pass through (towers, houses, stations).
+const cameraOccluders = [];
+function registerOccluder(x, z, radius, bottom, top) { cameraOccluders.push({ x, z, radius, bottom, top }); }
+
+function createTrackDeck(route, samples) {
+  const profile = [[-3.9, -0.52], [3.9, -0.52], [3.9, -1.0], [2.5, -1.95], [-2.5, -1.95], [-3.9, -1.0]];
+  const vertices = [];
+  const indices = [];
+  for (let index = 0; index <= samples; index += 1) {
+    const frame = trackFrameAt(route.index, index / samples);
+    profile.forEach(([x, y]) => {
+      const point = frame.position.clone().addScaledVector(frame.right, x).addScaledVector(frame.up, y);
+      vertices.push(point.x, point.y, point.z);
+    });
+  }
+  const sides = profile.length;
+  for (let index = 0; index < samples; index += 1) {
+    for (let edge = 0; edge < sides; edge += 1) {
+      const next = (edge + 1) % sides;
+      const a = index * sides + edge;
+      const b = index * sides + next;
+      const c = (index + 1) * sides + next;
+      const d = (index + 1) * sides + edge;
+      indices.push(a, d, b, b, d, c);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  const deck = new THREE.Mesh(geometry, materials.deck);
+  deck.receiveShadow = qualityProfiles[state.quality].shadows;
+  deck.castShadow = qualityProfiles[state.quality].shadows;
+  worldGroups.tracks.add(deck);
+  [-3.9, 3.9].forEach((offset) => {
+    const trimCurve = offsetCurve(route, offset, Math.floor(samples * 0.5));
+    const points = trimCurve.getPoints(samples).map((point, index) => point.addScaledVector(trackFrameAt(route.index, index / samples).up, -0.5));
+    const trim = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), Math.floor(samples * 0.6), 0.16, 3, false), materials.brass);
+    worldGroups.tracks.add(trim);
+  });
+}
+
 function createTrackNetwork() {
   const profile = qualityProfiles[state.quality];
   let sleeperCount = 0;
@@ -221,6 +298,7 @@ function createTrackNetwork() {
       rail.receiveShadow = profile.shadows;
       worldGroups.tracks.add(rail);
     });
+    createTrackDeck(route, Math.floor(railSegments * 0.9));
     const totalSleepers = Math.ceil(route.length / 6.3);
     for (let index = 0; index < totalSleepers; index += 1) {
       const u = index / Math.max(1, totalSleepers - 1);
@@ -249,7 +327,7 @@ function createBridge(routeIndex, fromU, toU, style) {
   for (let index = 0; index <= bays; index += 1) {
     const u = lerp(fromU, toU, index / bays);
     const frame = trackFrameAt(routeIndex, u);
-    const position = frame.position.clone().addScaledVector(frame.up, -2.2);
+    const position = frame.position.clone().addScaledVector(frame.up, -1.9);
     const side = frame.right;
     const height = style === 'stone' ? range(24, 58) : range(50, 120);
     const supportMaterial = style === 'steel' ? materials.signalPost : style === 'suspension' ? materials.brass : materials.paleStone;
@@ -272,10 +350,6 @@ function createBridge(routeIndex, fromU, toU, style) {
         worldGroups.details.add(tower);
       });
     }
-    const deck = new THREE.Mesh(new THREE.BoxGeometry(6.8, 0.6, Math.max(8, span / bays + 2)), materials.darkWood);
-    deck.position.copy(frame.position).addScaledVector(frame.up, -1.25);
-    deck.quaternion.copy(trackQuaternion(frame));
-    worldGroups.details.add(deck);
   }
 }
 
@@ -347,16 +421,20 @@ function createSkyAndAtmosphere() {
       varying vec3 vWorld;
       void main() {
         float h = clamp(vWorld.y * 0.5 + 0.5, 0.0, 1.0);
-        vec3 color = h < 0.5 ? mix(bottomColor, horizonColor, h * 2.0) : mix(horizonColor, topColor, (h - 0.5) * 2.0);
+        vec3 color = h < 0.5 ? mix(bottomColor, horizonColor, smoothstep(0.0, 1.0, h * 2.0)) : mix(horizonColor, topColor, smoothstep(0.0, 1.0, (h - 0.5) * 2.0));
         float sunGlow = pow(max(dot(vWorld, sunDirection), 0.0), 96.0) + 0.34 * pow(max(dot(vWorld, sunDirection), 0.0), 8.0);
         color += sunColor * sunGlow;
         gl_FragColor = vec4(color, 1.0);
       }
     `,
   });
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(4000, 32, 18), skyMaterial);
+  skyDome = new THREE.Group();
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 18), skyMaterial);
   sky.frustumCulled = false;
-  worldGroups.world.add(sky);
+  sky.renderOrder = -10;
+  skyDome.add(sky);
+  skyDome.userData.sky = sky;
+  scene.add(skyDome);
 
   const oceanMaterial = new THREE.ShaderMaterial({
     transparent: true,
@@ -385,24 +463,26 @@ function createSkyAndAtmosphere() {
   const starCount = state.quality === 'low' ? 280 : 700;
   const starPositions = new Float32Array(starCount * 3);
   for (let index = 0; index < starCount; index += 1) {
-    const radius = range(1800, 3000);
+    const radius = range(0.82, 0.92);
     const theta = range(0, Math.PI * 2);
-    const phi = range(0.12, 1.3);
+    const phi = range(0.05, 1.35);
     starPositions[index * 3] = Math.cos(theta) * Math.sin(phi) * radius;
-    starPositions[index * 3 + 1] = Math.cos(phi) * radius + 600;
+    starPositions[index * 3 + 1] = Math.cos(phi) * radius;
     starPositions[index * 3 + 2] = Math.sin(theta) * Math.sin(phi) * radius;
   }
   const starGeometry = new THREE.BufferGeometry();
   starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
-  starField = new THREE.Points(starGeometry, new THREE.PointsMaterial({ color: 0xfff1c1, size: 4, transparent: true, opacity: 0, depthWrite: false, sizeAttenuation: true }));
-  worldGroups.world.add(starField);
+  starField = new THREE.Points(starGeometry, new THREE.PointsMaterial({ color: 0xfff1c1, size: 1.6, transparent: true, opacity: 0, depthWrite: false, sizeAttenuation: false, fog: false }));
+  starField.frustumCulled = false;
+  starField.renderOrder = -9;
+  skyDome.add(starField);
   createCloudBanks();
 }
 
 function createCloudBanks() {
   const count = qualityProfiles[state.quality].cloudLobes;
-  const geometry = new THREE.SphereGeometry(1, state.quality === 'low' ? 8 : 12, state.quality === 'low' ? 6 : 8);
-  const cloudMaterial = new THREE.MeshBasicMaterial({ color: 0xffedda, transparent: true, opacity: 0.62, depthWrite: false });
+  const geometry = new THREE.IcosahedronGeometry(1, state.quality === 'low' ? 1 : 2);
+  const cloudMaterial = new THREE.MeshLambertMaterial({ color: 0xfff6ea, emissive: 0xffe2c4, emissiveIntensity: 0.42 });
   cloudInstances = new THREE.InstancedMesh(geometry, cloudMaterial, count);
   const dummy = new THREE.Object3D();
   const clusterCenters = [];
@@ -434,21 +514,29 @@ function createCloudBanks() {
 }
 
 function createIslandGeometry(radius, depth, segments = 14) {
+  // Ring 0–1 form the grass crown (cap + overhanging lip); rings 2+ form the tapered rock body.
   const vertices = [];
   const indices = [];
   const ringDefinitions = [
-    { y: 0, radius: 1 }, { y: -depth * 0.12, radius: 1.03 }, { y: -depth * 0.38, radius: 0.72 },
+    { y: 0, radius: 1 }, { y: -2.2, radius: 1.045 }, { y: -depth * 0.12, radius: 1.0 }, { y: -depth * 0.38, radius: 0.72 },
     { y: -depth * 0.72, radius: 0.4 }, { y: -depth, radius: 0.08 },
   ];
-  const jitter = Array.from({ length: segments }, () => range(0.83, 1.14));
+  const jitter = Array.from({ length: segments }, () => range(0.86, 1.12));
+  const squash = range(0.93, 1.05);
   ringDefinitions.forEach((ring, ringIndex) => {
     for (let segment = 0; segment < segments; segment += 1) {
       const angle = (segment / segments) * Math.PI * 2;
-      const ringJitter = jitter[segment] * (1 + Math.sin(segment * 2.7 + ringIndex) * 0.035);
-      vertices.push(Math.cos(angle) * radius * ring.radius * ringJitter, ring.y + Math.sin(segment * 1.9) * 0.8, Math.sin(angle) * radius * ring.radius * ringJitter * range(0.93, 1.05));
+      const ringJitter = jitter[segment] * (1 + Math.sin(segment * 2.7 + ringIndex) * (ringIndex > 1 ? 0.06 : 0.015));
+      const wobble = ringIndex > 1 ? Math.sin(segment * 1.9 + ringIndex) * depth * 0.03 : 0;
+      vertices.push(Math.cos(angle) * radius * ring.radius * ringJitter, ring.y + wobble, Math.sin(angle) * radius * ring.radius * ringJitter * squash);
     }
   });
-  for (let ring = 0; ring < ringDefinitions.length - 1; ring += 1) {
+  const centerIndex = vertices.length / 3;
+  vertices.push(0, 0.9, 0);
+  for (let segment = 0; segment < segments; segment += 1) {
+    indices.push(centerIndex, (segment + 1) % segments, segment);
+  }
+  const ringIndices = (ring) => {
     for (let segment = 0; segment < segments; segment += 1) {
       const next = (segment + 1) % segments;
       const a = ring * segments + segment;
@@ -457,25 +545,17 @@ function createIslandGeometry(radius, depth, segments = 14) {
       const d = (ring + 1) * segments + segment;
       indices.push(a, b, d, b, c, d);
     }
-  }
+  };
+  ringIndices(0);
+  const grassCount = indices.length;
+  for (let ring = 1; ring < ringDefinitions.length - 1; ring += 1) ringIndices(ring);
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
   geometry.setIndex(indices);
+  geometry.addGroup(0, grassCount, 1);
+  geometry.addGroup(grassCount, indices.length - grassCount, 0);
   geometry.computeVertexNormals();
   return geometry;
-}
-
-function createIslandTopGeometry(radius, segments = 18) {
-  const shape = new THREE.Shape();
-  for (let segment = 0; segment < segments; segment += 1) {
-    const angle = (segment / segments) * Math.PI * 2;
-    const edge = radius * range(0.84, 1.01);
-    const x = Math.cos(angle) * edge;
-    const y = Math.sin(angle) * edge * range(0.9, 1.06);
-    if (segment === 0) shape.moveTo(x, y); else shape.lineTo(x, y);
-  }
-  shape.closePath();
-  return new THREE.ShapeGeometry(shape);
 }
 
 function createHouse(scale = 1, roofColor = 'terracotta', elaborate = false) {
@@ -521,40 +601,26 @@ function createHouse(scale = 1, roofColor = 'terracotta', elaborate = false) {
 const treePlacements = [];
 function addTreePlacement(position, scale, type = 'leaf') { treePlacements.push({ position: position.clone(), scale, type }); }
 
-function isInsideTrackCorridor(worldPosition, corridors, extraClearance = 0) {
-  return corridors.some((corridor) => {
-    const tangent = corridor.tangent.clone().setY(0).normalize();
-    const side = new THREE.Vector3(tangent.z, 0, -tangent.x);
-    const relative = worldPosition.clone().sub(corridor.point);
-    return Math.abs(relative.dot(side)) < corridor.halfWidth + extraClearance;
-  });
-}
-
-function islandPlacement(position, radius, minimumRadius, maximumRadius, corridors, extraClearance) {
-  let local = new THREE.Vector3();
-  for (let attempt = 0; attempt < 16; attempt += 1) {
+function islandPlacement(position, radius, minimumRadius, maximumRadius, clearance) {
+  for (let attempt = 0; attempt < 24; attempt += 1) {
     const angle = range(0, Math.PI * 2);
     const distance = range(radius * minimumRadius, radius * maximumRadius);
-    local = new THREE.Vector3(Math.cos(angle) * distance, 1, Math.sin(angle) * distance);
-    if (!isInsideTrackCorridor(local.clone().add(position), corridors, extraClearance)) return local;
+    const local = new THREE.Vector3(Math.cos(angle) * distance, 1, Math.sin(angle) * distance);
+    if (horizontalTrackDistance(position.x + local.x, position.y + 6, position.z + local.z) > clearance) return local;
   }
-  return local;
+  return null;
 }
 
 function createFloatingIsland(options) {
-  const { position, radius = 70, depth = radius * 0.9, biome = 'meadow', houses = 1, trees = 10, landmark = '', trackCorridors = [] } = options;
+  const { position, radius = 70, depth = radius * 0.9, biome = 'meadow', houses = 1, trees = 10, landmark = '' } = options;
   const group = new THREE.Group();
   group.position.copy(position);
   const rockMaterial = biome === 'frost' ? materials.rockCold : biome === 'mango' ? materials.rockWarm : materials.rock;
-  const rock = new THREE.Mesh(createIslandGeometry(radius, depth, radius > 110 ? 18 : 14), rockMaterial);
+  const grassMaterial = biome === 'frost' ? materials.frostGrass : biome === 'mango' ? materials.mangoGrass : biome === 'storm' ? materials.stormGrass : biome === 'garden' ? materials.gardenGrass : materials.grass;
+  const rock = new THREE.Mesh(createIslandGeometry(radius, depth, radius > 200 ? 28 : radius > 110 ? 20 : 15), [rockMaterial, grassMaterial]);
   rock.castShadow = state.quality !== 'low';
   rock.receiveShadow = true;
-  const grassMaterial = biome === 'frost' ? materials.frostGrass : biome === 'mango' ? materials.mangoGrass : biome === 'storm' ? materials.stormGrass : biome === 'garden' ? materials.gardenGrass : materials.grass;
-  const top = new THREE.Mesh(createIslandTopGeometry(radius * 0.98, radius > 110 ? 22 : 16), grassMaterial);
-  top.rotation.x = -Math.PI / 2;
-  top.position.y = 0.65;
-  top.receiveShadow = true;
-  group.add(rock, top);
+  group.add(rock);
 
   if (radius > 70) {
     const spikeCount = state.quality === 'low' ? 3 : Math.min(7, Math.round(radius / 28));
@@ -570,15 +636,18 @@ function createFloatingIsland(options) {
   }
 
   for (let index = 0; index < houses; index += 1) {
-    const local = islandPlacement(position, radius, 0.18, 0.62, trackCorridors, 8);
+    const local = islandPlacement(position, radius, 0.18, 0.62, 24);
+    if (!local) continue;
     const roofColor = biome === 'frost' ? 'navy' : index % 2 ? 'teal' : 'terracotta';
     const house = createHouse(radius > 120 ? 1.18 : 0.8, roofColor, index === 0);
     house.position.copy(local).setY(0.8);
     house.rotation.y = -Math.atan2(local.z, local.x) + Math.PI * 0.5;
     group.add(house);
+    registerOccluder(position.x + local.x, position.z + local.z, (radius > 120 ? 13 : 9), position.y, position.y + 30);
   }
   for (let index = 0; index < trees; index += 1) {
-    const local = islandPlacement(position, radius, 0.06, 0.78, trackCorridors, 4);
+    const local = islandPlacement(position, radius, 0.06, 0.78, 9);
+    if (!local) continue;
     const worldPosition = local.add(position);
     const treeType = biome === 'frost' || biome === 'pine' ? 'pine' : biome === 'mango' ? 'gold' : 'leaf';
     addTreePlacement(worldPosition, range(0.72, 1.45) * (radius > 120 ? 1.25 : 1), treeType);
@@ -587,6 +656,7 @@ function createFloatingIsland(options) {
     for (let index = 0; index < 18; index += 1) {
       const flower = new THREE.Mesh(new THREE.SphereGeometry(range(0.7, 1.5), 6, 4), colorMaterial(index % 3 ? 0xe78378 : 0xf3d376, { flatShading: true }));
       flower.position.set(range(-radius * 0.7, radius * 0.7), 1.6, range(-radius * 0.7, radius * 0.7));
+      if (horizontalTrackDistance(position.x + flower.position.x, position.y + 6, position.z + flower.position.z) < 7) continue;
       group.add(flower);
     }
   }
@@ -616,6 +686,7 @@ function createLabelSprite(text, width, position) {
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false }));
   sprite.position.copy(position);
   sprite.scale.set(width, width * 0.19, 1);
+  sprite.renderOrder = 6;
   return sprite;
 }
 
@@ -696,33 +767,57 @@ function createStation(routeIndex, u, name, size = 'small', biome = 'meadow') {
   platform.quaternion.copy(trackQuaternion(trackFrame));
   platform.receiveShadow = true;
   worldGroups.buildings.add(platform);
-  const building = createHouse(size === 'grand' ? 1.65 : 0.86, biome === 'frost' ? 'navy' : 'teal', true);
-  building.position.set(size === 'grand' ? 22 : 10, 1, 0);
+  // Station local +X points away from the platform towards the track; buildings sit on the far (negative) side.
+  const building = createHouse(size === 'grand' ? 1.45 : 0.86, biome === 'frost' ? 'navy' : 'teal', true);
+  const buildingX = size === 'grand' ? -34 : -15;
+  building.position.set(buildingX, 1, size === 'grand' ? 18 : 0);
+  building.rotation.y = Math.PI / 2;
   station.add(building);
   if (size === 'grand') {
-    const canopy = new THREE.Mesh(new THREE.BoxGeometry(58, 0.7, 116), materials.glass);
-    canopy.position.set(-10, 17, 0);
-    canopy.rotation.z = -0.05;
+    // Glass train shed spanning platform and track: columns plus arched brass ribs across the rails.
+    const shedCenter = 4;
+    const shedHalfWidth = 22;
+    const canopy = new THREE.Mesh(new THREE.CylinderGeometry(shedHalfWidth, shedHalfWidth, 108, 18, 1, true, -Math.PI / 2, Math.PI), materials.glass);
+    canopy.rotation.x = -Math.PI / 2;
+    canopy.scale.set(1, 1, 0.42);
+    canopy.position.set(shedCenter, 15, 0);
     station.add(canopy);
-    for (let index = -2; index <= 2; index += 1) {
-      const rib = new THREE.Mesh(new THREE.BoxGeometry(0.7, 17, 117), materials.brass);
-      rib.position.set(index * 12 - 10, 8.5, 0);
+    for (let index = -4; index <= 4; index += 1) {
+      const z = index * 13;
+      const rib = new THREE.Mesh(new THREE.TorusGeometry(shedHalfWidth, 0.42, 6, 22, Math.PI), materials.brass);
+      rib.scale.y = 0.42;
+      rib.position.set(shedCenter, 15, z);
       station.add(rib);
+      [-1, 1].forEach((sideSign) => {
+        const column = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.75, 15, 8), materials.brass);
+        column.position.set(shedCenter + sideSign * shedHalfWidth, 7.5, z);
+        station.add(column);
+      });
     }
-    const tower = new THREE.Mesh(new THREE.BoxGeometry(18, 58, 18), materials.plaster);
-    tower.position.set(34, 29, -26);
-    const towerRoof = new THREE.Mesh(new THREE.ConeGeometry(15, 17, 6), materials.terracotta);
-    towerRoof.position.set(34, 66, -26);
-    const clockFace = new THREE.Mesh(new THREE.CylinderGeometry(5.4, 5.4, 0.7, 24), materials.window);
-    clockFace.rotation.x = Math.PI / 2;
-    clockFace.position.set(34, 47, -35.2);
-    station.add(tower, towerRoof, clockFace);
+    const tower = new THREE.Mesh(new THREE.CylinderGeometry(7.5, 9.5, 58, 8), materials.plaster);
+    tower.position.set(-40, 29, -34);
+    const towerRoof = new THREE.Mesh(new THREE.ConeGeometry(11, 17, 8), materials.terracotta);
+    towerRoof.position.set(-40, 66.5, -34);
+    const clockFace = new THREE.Mesh(new THREE.CylinderGeometry(5.2, 5.2, 0.7, 24), materials.enamelCream);
+    clockFace.rotation.z = Math.PI / 2;
+    clockFace.position.set(-30.6, 47, -34);
+    const clockRim = new THREE.Mesh(new THREE.TorusGeometry(5.3, 0.38, 6, 24), materials.brass);
+    clockRim.rotation.y = Math.PI / 2;
+    clockRim.position.copy(clockFace.position);
+    station.add(tower, towerRoof, clockFace, clockRim);
   }
-  station.add(createLabelSprite(name, size === 'grand' ? 42 : 24, new THREE.Vector3(0, size === 'grand' ? 29 : 17, -platformLength * 0.3)));
+  station.add(createLabelSprite(name, size === 'grand' ? 42 : 24, new THREE.Vector3(size === 'grand' ? -8 : -6, size === 'grand' ? 30 : 15, -platformLength * 0.3)));
   station.position.copy(position).addScaledVector(side, platformOffset).add(new THREE.Vector3(0, -1.15, 0));
   station.rotation.y = Math.atan2(tangent.x, tangent.z);
   station.traverse((child) => { if (child.isMesh) { child.castShadow = state.quality !== 'low'; child.receiveShadow = true; } });
   worldGroups.buildings.add(station);
+  station.updateMatrixWorld(true);
+  const buildingWorld = station.localToWorld(new THREE.Vector3(buildingX, 0, building.position.z));
+  registerOccluder(buildingWorld.x, buildingWorld.z, size === 'grand' ? 20 : 11, buildingWorld.y, buildingWorld.y + (size === 'grand' ? 34 : 20));
+  if (size === 'grand') {
+    const towerWorld = station.localToWorld(new THREE.Vector3(-40, 0, -34));
+    registerOccluder(towerWorld.x, towerWorld.z, 11, towerWorld.y, towerWorld.y + 76);
+  }
   const record = { routeIndex, u, name, position: position.clone(), biome };
   stations.push(record);
   return record;
@@ -751,9 +846,7 @@ function createWorldRegions() {
   ];
   islandDefinitions.forEach(([routeIndex, u, radius, biome, houses, trees, landmark, lateral]) => {
     const pose = poseOnRoute(routeIndex, u, lateral, -4.2);
-    const routePose = poseOnRoute(routeIndex, u);
-    const trackCorridors = [{ point: routePose.position, tangent: routePose.tangent, halfWidth: 12 }];
-    createFloatingIsland({ position: pose.position, radius, depth: radius * range(0.75, 1.25), biome, houses, trees, landmark, trackCorridors });
+    createFloatingIsland({ position: pose.position, radius, depth: radius * range(0.75, 1.25), biome, houses, trees, landmark });
     if (biome === 'garden' || biome === 'meadow') makeWaterfall(pose.position.clone().add(pose.side.clone().multiplyScalar(radius * 0.62)), radius * 1.45, radius * 0.12);
   });
 
@@ -769,11 +862,7 @@ function createWorldRegions() {
       trees: Math.floor(range(2, 10)),
     });
   }
-  const hubCorridors = routes.flatMap((route) => [0.01, 0.99].map((u) => {
-    const frame = poseOnRoute(route.index, u);
-    return { point: frame.position, tangent: frame.tangent, halfWidth: 14 };
-  }));
-  createFloatingIsland({ position: new THREE.Vector3(0, 332, 0), radius: 265, depth: 205, biome: 'meadow', houses: 10, trees: 44, trackCorridors: hubCorridors });
+  createFloatingIsland({ position: new THREE.Vector3(0, 332, 0), radius: 265, depth: 205, biome: 'meadow', houses: 10, trees: 44 });
   createGrandSkyCity();
   createVegetationInstances();
   createWindmillsAndObservatories();
@@ -874,6 +963,22 @@ function createReferenceAirship(position, scale, colorName = 'railwayOrange') {
   worldGroups.details.add(airship);
 }
 
+// Slide a planned city tower around the hub until it clears every railway line and existing building.
+function findClearCitySpot(x, z, width) {
+  const baseAngle = Math.atan2(z, x);
+  const baseRadius = Math.hypot(x, z);
+  for (let step = 0; step < 40; step += 1) {
+    const angle = baseAngle + (step % 2 ? 1 : -1) * Math.ceil(step / 2) * 0.09;
+    const radius = Math.min(232, baseRadius + Math.floor(step / 8) * 18);
+    const candidateX = Math.cos(angle) * radius;
+    const candidateZ = Math.sin(angle) * radius;
+    const trackClear = horizontalTrackDistance(candidateX, 338, candidateZ, 70, 120) > width + 34;
+    const buildingClear = cameraOccluders.every((occluder) => Math.hypot(occluder.x - candidateX, occluder.z - candidateZ) > occluder.radius + width + 4);
+    if (trackClear && buildingClear) return { x: candidateX, z: candidateZ };
+  }
+  return null;
+}
+
 function createGrandSkyCity() {
   const towerLayout = [
     [-150, -90, 78, 16], [-112, 86, 105, 18], [-52, -146, 92, 15], [-8, 92, 132, 22],
@@ -882,7 +987,10 @@ function createGrandSkyCity() {
   ];
   const count = state.quality === 'low' ? 8 : towerLayout.length;
   towerLayout.slice(0, count).forEach(([x, z, height, width], index) => {
-    createCityTower(x, z, height, width, index % 3 === 0 ? materials.terracotta : index % 3 === 1 ? materials.teal : materials.copper, index);
+    const spot = findClearCitySpot(x, z, width);
+    if (!spot) return;
+    createCityTower(spot.x, spot.z, height, width, index % 3 === 0 ? materials.terracotta : index % 3 === 1 ? materials.teal : materials.copper, index);
+    registerOccluder(spot.x, spot.z, width + 3, 332, 332 + height * 1.12);
   });
 
   const bridgeCurve = new THREE.CatmullRomCurve3([
@@ -921,6 +1029,7 @@ function createWindmillsAndObservatories() {
     windmill.add(tower, roof, hub, blades);
     windmill.position.copy(position);
     worldGroups.details.add(windmill);
+    registerOccluder(position.x, position.z, 9, position.y, position.y + 36);
   });
   const observatoryPosition = poseOnRoute(2, 0.77, -65, 15).position;
   const observatory = new THREE.Group();
@@ -934,6 +1043,7 @@ function createWindmillsAndObservatories() {
   observatory.add(base, dome, telescope);
   observatory.position.copy(observatoryPosition);
   worldGroups.details.add(observatory);
+  registerOccluder(observatoryPosition.x, observatoryPosition.z, 17, observatoryPosition.y, observatoryPosition.y + 36);
 }
 
 function createAurelion() {
@@ -1092,7 +1202,7 @@ function createLocomotive(config) {
     const cabRoof = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), primary);
     cabRoof.scale.set(3.15, 1.05, 2.8);
     cabRoof.position.set(0, 7.55, 5.1);
-    const chimney = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.96, 4.2, 12), materials.signalDark);
+    const chimney = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.96, 4.2, 12), materials.inkBlue);
     chimney.position.set(0, 7.45, -3.6);
     const chimneyCrown = new THREE.Mesh(new THREE.CylinderGeometry(0.92, 0.72, 0.7, 12), materials.copper);
     chimneyCrown.position.set(0, 9.55, -3.6);
@@ -1299,8 +1409,13 @@ function updateTrainPhysics(train, delta) {
     const distanceToJunction = train.direction > 0 ? (1 - train.u) * route.length : train.u * route.length;
     if (distanceToJunction < 170) targetSpeed = Math.min(targetSpeed, Math.max(0, distanceToJunction * 0.09));
     const difference = targetSpeed - train.speed;
-    train.throttle = clamp(difference * 0.08 + 0.34, 0, 1);
-    train.brake = clamp(-difference * 0.12, 0, 1);
+    if (difference >= -0.4) {
+      train.throttle = clamp(difference * 0.1 + 0.3, 0, 1);
+      train.brake = 0;
+    } else {
+      train.throttle = 0;
+      train.brake = clamp(-difference * 0.14, 0, 1);
+    }
   }
   const rollingResistance = 0.16 + train.speed * 0.007;
   const grade = route.curve.getTangentAt(clamp(train.u, 0, 1)).y * train.direction;
@@ -1312,6 +1427,9 @@ function updateTrainPhysics(train, delta) {
   if (train.direction > 0 && train.u >= 0.997) {
     if (train.auto) arriveAtJunction(train); else { train.previousRouteIndex = train.routeIndex; train.routeIndex = state.pendingRoute; train.u = 0.004; }
   } else if (train.direction < 0 && train.u <= 0.003) {
+    const arrivedFrom = train.previousRouteIndex;
+    train.previousRouteIndex = train.routeIndex;
+    train.routeIndex = arrivedFrom;
     train.u = 0.996;
   }
   updateTrainVisual(train, delta);
@@ -1380,7 +1498,7 @@ function applyWeather(weather) {
     storm: { density: 0.00062, particles: true, color: 0x708a94, size: 0.9 },
     snow: { density: 0.0004, particles: true, color: 0xf4f3e8, size: 2.4 },
   }[weather];
-  scene.fog.density = config.density;
+  scene.fog.density = Math.max(config.density, 1.05 / camera.far);
   scene.fog.color.set(config.color);
   weatherPoints.visible = config.particles;
   weatherPoints.material.color.set(config.color);
@@ -1405,9 +1523,8 @@ function updateWeather(delta) {
   weatherPoints.position.set(basePosition.x, basePosition.y, basePosition.z);
   weatherPoints.geometry.attributes.position.needsUpdate = true;
   if (state.weather === 'storm' && random() < delta * 0.06) {
-    hemisphere.intensity += 3.6;
+    state.lightning = 1;
     state.cameraShake = 0.7;
-    setTimeout(() => { if (hemisphere) hemisphere.intensity = 1; }, 85);
   }
 }
 
@@ -1450,12 +1567,17 @@ function updateTimeOfDay(delta) {
   sun.position.copy(sunDirection).multiplyScalar(1400);
   sun.color.copy(palette.light);
   sun.intensity = palette.intensity * (state.weather === 'storm' ? 0.38 : state.weather === 'rain' ? 0.7 : 1);
-  hemisphere.intensity = Math.max(0.18, palette.intensity * 0.72);
+  state.lightning = Math.max(0, state.lightning - delta * 6);
+  hemisphere.intensity = Math.max(0.18, palette.intensity * 0.72) + state.lightning * 3.2;
   starField.material.opacity = smoothstep(0.77, 0.91, state.timeOfDay) + (1 - smoothstep(0.07, 0.2, state.timeOfDay));
   materials.window.emissiveIntensity = 0.55 + starField.material.opacity * 2.15;
   cloudOcean.material.uniforms.time.value = state.elapsed;
   cloudOcean.material.uniforms.color.value.copy(palette.bottom).lerp(new THREE.Color(0xffffff), 0.62);
   cloudOcean.material.uniforms.opacity.value = state.timeOfDay > 0.8 || state.timeOfDay < 0.16 ? 0.45 : 0.78;
+  if (cloudInstances) {
+    cloudInstances.material.color.set(0xffffff).lerp(palette.horizon, 0.18);
+    cloudInstances.material.emissive.copy(palette.horizon).lerp(palette.sun, 0.5).multiplyScalar(0.34 + palette.intensity * 0.16);
+  }
 }
 
 function setTimeMode(mode) {
@@ -1640,12 +1762,15 @@ function cameraCompositionForMode(train) {
     desiredCameraPosition.copy(rearPose.position).addScaledVector(forward, -distance).addScaledVector(side, 39).add(new THREE.Vector3(0, 22 + speedFactor * 6, 0));
     desiredCameraLookAt.copy(position).addScaledVector(forward, 18).add(new THREE.Vector3(0, 4.5, 0));
   } else if (mode === 1) {
-    desiredCameraPosition.copy(localPointToWorld(locomotive, 0, 6.25, -8.6));
-    desiredCameraLookAt.copy(desiredCameraPosition).addScaledVector(forward, 90).add(new THREE.Vector3(0, 1, 0));
+    // Driver's eye just above and ahead of the cab roofline so the boiler/nose frames the bottom of the view.
+    const cabZ = train.type === 'steam' || train.type === 'freight' ? 3.6 : -5.2;
+    desiredCameraPosition.copy(localPointToWorld(locomotive, -2.3, 7.9, cabZ));
+    desiredCameraLookAt.copy(desiredCameraPosition).addScaledVector(forward, 90).addScaledVector(side, 2.3).add(new THREE.Vector3(0, -5, 0));
   } else if (mode === 2) {
+    // Passenger leaning out of a window: outside the car body, looking forward along the train and out over the clouds.
     const passengerCar = train.parts[Math.min(1, train.parts.length - 1)].root;
-    desiredCameraPosition.copy(localPointToWorld(passengerCar, 2.72, 5.25, 0));
-    desiredCameraLookAt.copy(desiredCameraPosition).addScaledVector(side, 90).add(new THREE.Vector3(0, -3, 0));
+    desiredCameraPosition.copy(localPointToWorld(passengerCar, -3.9, 5.6, 2.5));
+    desiredCameraLookAt.copy(desiredCameraPosition).addScaledVector(forward, 60).addScaledVector(side, 20).add(new THREE.Vector3(0, -5, 0));
   } else if (mode === 3) {
     const wave = Math.sin(state.elapsed * 0.16);
     desiredCameraPosition.copy(position).addScaledVector(side, 42 + wave * 16).addScaledVector(forward, wave * 22).add(new THREE.Vector3(0, 13, 0));
@@ -1670,12 +1795,83 @@ function cameraCompositionForMode(train) {
   }
 }
 
+// For framed shots, prefer flipping to the other side of the track or rising over a building to cutting in close.
+const cameraVariant = { index: 0, hold: 0 };
+function variantPosition(train, index, out) {
+  out.copy(desiredCameraPosition);
+  if (index === 0) return out;
+  const pose = getPartPose(train, 0);
+  const side = pose.right.clone().setY(0).normalize();
+  const offset = out.clone().sub(desiredCameraLookAt);
+  if (index === 1 || index === 3) offset.addScaledVector(side, -2 * offset.dot(side));
+  if (index >= 2) offset.y += 34;
+  return out.copy(desiredCameraLookAt).add(offset);
+}
+
+function chooseUnblockedVariant(train, delta) {
+  cameraVariant.hold = Math.max(0, cameraVariant.hold - delta);
+  const candidate = new THREE.Vector3();
+  const currentClear = occlusionFraction(desiredCameraLookAt, variantPosition(train, cameraVariant.index, candidate)) >= 1;
+  if (!currentClear || (cameraVariant.index !== 0 && cameraVariant.hold === 0)) {
+    for (let index = 0; index < 4; index += 1) {
+      if (occlusionFraction(desiredCameraLookAt, variantPosition(train, index, candidate)) >= 1) {
+        if (index !== cameraVariant.index) { cameraVariant.index = index; cameraVariant.hold = 4; }
+        break;
+      }
+    }
+  }
+  variantPosition(train, cameraVariant.index, desiredCameraPosition);
+}
+
+function occlusionFraction(target, cameraPosition) {
+  const probe = cameraPosition.clone();
+  resolveCameraOcclusion(target, probe);
+  return probe.distanceToSquared(cameraPosition) < 0.01 ? 1 : 0;
+}
+
+// Pull the camera towards its subject when a tower, house or station would sit between them.
+function resolveCameraOcclusion(target, cameraPosition) {
+  const dx = cameraPosition.x - target.x;
+  const dz = cameraPosition.z - target.z;
+  const dy = cameraPosition.y - target.y;
+  const length = Math.hypot(dx, dy, dz);
+  if (length < 1) return;
+  let nearest = 1;
+  for (const occluder of cameraOccluders) {
+    const ox = target.x - occluder.x;
+    const oz = target.z - occluder.z;
+    const a = dx * dx + dz * dz;
+    const b = 2 * (ox * dx + oz * dz);
+    const c = ox * ox + oz * oz - occluder.radius * occluder.radius;
+    if (a < 1e-6) continue;
+    const discriminant = b * b - 4 * a * c;
+    if (discriminant < 0) continue;
+    const root = Math.sqrt(discriminant);
+    const entry = (-b - root) / (2 * a);
+    const exit = (-b + root) / (2 * a);
+    if (exit < 0 || entry > nearest) continue;
+    const t = Math.max(0, entry);
+    const y = target.y + dy * t;
+    if (y < occluder.bottom || y > occluder.top) continue;
+    if (c < 0) continue; // subject itself is inside this footprint (e.g. station shed); ignore
+    nearest = Math.min(nearest, t);
+  }
+  if (nearest < 1) {
+    const safe = Math.max(0.12, nearest - 3 / length);
+    cameraPosition.set(target.x + dx * safe, target.y + dy * safe + (1 - safe) * 10, target.z + dz * safe);
+  }
+}
+
 function updateCamera(delta) {
   const train = selectedTrain();
   cameraCompositionForMode(train);
-  const damping = 1 - Math.exp(-delta * (state.cameraMode === 1 || state.cameraMode === 2 ? 9 : 3.8));
+  const attached = state.cameraMode === 1 || state.cameraMode === 2;
+  if (state.cameraMode === 0 || state.cameraMode === 3) chooseUnblockedVariant(train, delta);
+  if (!attached) resolveCameraOcclusion(desiredCameraLookAt, desiredCameraPosition);
+  const damping = attached ? 1 : 1 - Math.exp(-delta * 3.8);
   if (!camera.position.lengthSq()) camera.position.copy(desiredCameraPosition);
   camera.position.lerp(desiredCameraPosition, damping);
+  if (!attached) resolveCameraOcclusion(desiredCameraLookAt, camera.position);
   currentCameraLookAt.lerp(desiredCameraLookAt, damping);
   if (state.cameraShake > 0) {
     camera.position.x += (random() - 0.5) * state.cameraShake;
@@ -1685,27 +1881,43 @@ function updateCamera(delta) {
   camera.lookAt(currentCameraLookAt);
 }
 
+function setCameraMode(mode) {
+  state.cameraMode = mode;
+  dom.cameraLabel.textContent = cameraShortLabels[mode];
+  dom.cameraButton.setAttribute('aria-label', `Change camera (current: ${cameraModes[mode].toLowerCase()})`);
+  dom.cameraButton.title = cameraModes[mode];
+}
+
 function cycleCamera() {
-  state.cameraMode = (state.cameraMode + 1) % cameraModes.length;
-  dom.cameraLabel.textContent = cameraModes[state.cameraMode];
+  setCameraMode((state.cameraMode + 1) % cameraModes.length);
   if (state.cameraMode === 6) openPanel(dom.mapPanel);
+}
+
+function showNotice(title, label = 'NOTICE') {
+  dom.eventLabel.textContent = label;
+  dom.eventTitle.textContent = title;
+  dom.eventBanner.classList.remove('hidden');
+  clearTimeout(state.bannerTimeout);
+  state.bannerTimeout = setTimeout(() => dom.eventBanner.classList.add('hidden'), 3200);
 }
 
 function showScenicEvent(title, key) {
   if (state.lastScenicKey === key || !state.cinematics) return;
   state.lastScenicKey = key;
+  dom.eventLabel.textContent = 'SCENIC MOMENT';
   state.eventTimer = 6;
   dom.eventTitle.textContent = title;
   dom.eventBanner.classList.remove('hidden');
-  setTimeout(() => dom.eventBanner.classList.add('hidden'), 4300);
+  clearTimeout(state.bannerTimeout);
+  state.bannerTimeout = setTimeout(() => dom.eventBanner.classList.add('hidden'), 4300);
 }
 
-function updateScenicEvents() {
+function updateScenicEvents(delta) {
   const train = selectedTrain();
   if (train.routeIndex === 0 && train.u > 0.5 && train.u < 0.56) showScenicEvent('Cloud Dive · Folded Gardens', `dive-${Math.floor(train.distanceTravelled / routes[0].length)}`);
   if (train.routeIndex === 1 && train.u > 0.42 && train.u < 0.48) showScenicEvent('The Mountain Spiral', `spiral-${Math.floor(train.distanceTravelled / routes[1].length)}`);
   if (train.routeIndex === 2 && train.u > 0.31 && train.u < 0.37) showScenicEvent('The Great Sky Bridge', `bridge-${Math.floor(train.distanceTravelled / routes[2].length)}`);
-  state.eventTimer = Math.max(0, state.eventTimer - 1 / 60);
+  state.eventTimer = Math.max(0, state.eventTimer - delta);
 }
 
 function updateCreatures(delta) {
@@ -1735,63 +1947,120 @@ function updateCreatures(delta) {
   worldGroups.details.traverse((object) => { if (object.userData.isWindmill) object.rotation.z -= delta * 0.24; });
 }
 
-function mapCoordinates(vector, canvas) {
-  const bounds = 1900;
-  return {
-    x: canvas.width * 0.5 + (vector.x / bounds) * canvas.width * 0.44,
-    y: canvas.height * 0.5 + (vector.z / bounds) * canvas.height * 0.44,
-  };
+const mapView = { width: 900, height: 560 };
+
+function mapCoordinates(vector) {
+  // Network spans roughly x −1500…1550 and z −1100…870; fit it with margin for labels.
+  const scale = Math.min((mapView.width * 0.86) / 3100, (mapView.height * 0.8) / 2000);
+  return { x: mapView.width * 0.5 + (vector.x - 25) * scale, y: mapView.height * 0.5 + (vector.z + 115) * scale };
+}
+
+function sizeRouteMap() {
+  const canvas = dom.routeMap;
+  const rect = canvas.getBoundingClientRect();
+  const ratio = Math.min(2, window.devicePixelRatio || 1);
+  const width = Math.max(300, Math.round(rect.width || 900));
+  const height = Math.round(width * 0.6);
+  if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(height * ratio);
+  }
+  mapView.width = width;
+  mapView.height = height;
+  mapView.ratio = ratio;
 }
 
 function drawRouteMap() {
   const canvas = dom.routeMap;
   const context = canvas.getContext('2d');
-  const gradient = context.createRadialGradient(canvas.width * 0.5, canvas.height * 0.5, 10, canvas.width * 0.5, canvas.height * 0.5, canvas.width * 0.62);
+  const { width, height } = mapView;
+  const textScale = clamp(width / 760, 0.92, 1.25);
+  context.setTransform(mapView.ratio || 1, 0, 0, mapView.ratio || 1, 0, 0);
+  const gradient = context.createRadialGradient(width * 0.5, height * 0.5, 10, width * 0.5, height * 0.5, width * 0.62);
   gradient.addColorStop(0, '#315f60');
   gradient.addColorStop(1, '#0c3035');
   context.fillStyle = gradient;
-  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillRect(0, 0, width, height);
 
-  context.globalAlpha = 0.18;
+  context.globalAlpha = 0.14;
   context.fillStyle = '#e9f5ed';
   for (let index = 0; index < 22; index += 1) {
-    const x = (index * 173) % canvas.width;
-    const y = (index * 97) % canvas.height;
+    const x = ((index * 173) % 900) / 900 * width;
+    const y = ((index * 97) % 560) / 560 * height;
     context.beginPath();
-    context.ellipse(x, y, 80 + (index % 4) * 30, 18 + (index % 3) * 6, 0, 0, Math.PI * 2);
+    context.ellipse(x, y, (80 + (index % 4) * 30) * width / 900, (18 + (index % 3) * 6) * width / 900, 0, 0, Math.PI * 2);
     context.fill();
   }
   context.globalAlpha = 1;
+  context.lineJoin = 'round';
 
   routes.forEach((route) => {
+    const selected = route.index === selectedTrain().routeIndex;
     context.beginPath();
     for (let index = 0; index <= 240; index += 1) {
-      const point = route.curve.getPointAt(index / 240);
-      const mapPoint = mapCoordinates(point, canvas);
+      const mapPoint = mapCoordinates(route.curve.getPointAt(index / 240));
       if (index === 0) context.moveTo(mapPoint.x, mapPoint.y); else context.lineTo(mapPoint.x, mapPoint.y);
     }
-    context.lineWidth = 7;
+    context.lineWidth = selected ? 9 : 7;
     context.strokeStyle = 'rgba(6,28,31,.64)';
     context.stroke();
-    context.lineWidth = 2.4;
+    context.lineWidth = selected ? 3.6 : 2.2;
     context.strokeStyle = route.color;
+    context.globalAlpha = selected || route.index === state.pendingRoute ? 1 : 0.62;
     context.stroke();
+    context.globalAlpha = 1;
   });
 
-  stations.forEach((station) => {
-    const point = mapCoordinates(station.position, canvas);
+  const placed = [];
+  const overlaps = (box) => placed.some((other) => box.x < other.x + other.w && box.x + box.w > other.x && box.y < other.y + other.h && box.y + box.h > other.y);
+  trains.forEach((train) => {
+    const point = mapCoordinates(poseOnRoute(train.routeIndex, train.u).position);
+    placed.push({ x: point.x - 8, y: point.y - 8, w: 16, h: 16 });
+  });
+  const ordered = [...stations].sort((a, b) => (b.name === 'Grand Cloud Junction') - (a.name === 'Grand Cloud Junction'));
+  ordered.forEach((station) => {
+    const point = mapCoordinates(station.position);
+    const grand = station.name === 'Grand Cloud Junction';
     context.fillStyle = '#e8755f';
+    context.strokeStyle = '#0c3035';
+    context.lineWidth = 2;
     context.beginPath();
-    context.arc(point.x, point.y, station.name === 'Grand Cloud Junction' ? 7 : 4.5, 0, Math.PI * 2);
+    context.arc(point.x, point.y, grand ? 7 : 4.5, 0, Math.PI * 2);
     context.fill();
-    context.fillStyle = 'rgba(245,237,210,.88)';
-    context.font = station.name === 'Grand Cloud Junction' ? '600 13px Inter' : '500 10px Inter';
-    context.textAlign = 'center';
-    context.fillText(station.name, point.x, point.y - 10);
+    context.stroke();
+    placed.push({ x: point.x - 6, y: point.y - 6, w: 12, h: 12 });
+  });
+  ordered.forEach((station) => {
+    const point = mapCoordinates(station.position);
+    const grand = station.name === 'Grand Cloud Junction';
+    const fontSize = Math.round((grand ? 13 : 11) * textScale);
+    context.font = `${grand ? 700 : 600} ${fontSize}px Inter, Arial, sans-serif`;
+    const textWidth = context.measureText(station.name).width;
+    const gap = grand ? 12 : 9;
+    const candidates = [
+      [point.x - textWidth / 2, point.y - gap - fontSize], [point.x - textWidth / 2, point.y + gap],
+      [point.x + gap, point.y - fontSize / 2], [point.x - gap - textWidth, point.y - fontSize / 2],
+      [point.x + gap, point.y - gap - fontSize], [point.x - gap - textWidth, point.y + gap],
+    ];
+    let box = null;
+    for (const [x, y] of candidates) {
+      const candidate = { x: x - 3, y: y - 2, w: textWidth + 6, h: fontSize + 4 };
+      if (!overlaps(candidate)) { box = candidate; break; }
+    }
+    box ||= { x: candidates[0][0] - 3, y: candidates[0][1] - 2, w: textWidth + 6, h: fontSize + 4 };
+    placed.push(box);
+    context.fillStyle = 'rgba(6,28,31,.62)';
+    context.beginPath();
+    context.roundRect(box.x, box.y, box.w, box.h, 4);
+    context.fill();
+    context.fillStyle = 'rgba(245,237,210,.94)';
+    context.textAlign = 'left';
+    context.textBaseline = 'top';
+    context.fillText(station.name, box.x + 3, box.y + 2.5);
   });
 
   trains.forEach((train) => {
-    const point = mapCoordinates(poseOnRoute(train.routeIndex, train.u).position, canvas);
+    const point = mapCoordinates(poseOnRoute(train.routeIndex, train.u).position);
     const selected = train.index === state.selectedTrain;
     context.fillStyle = selected ? '#ffda75' : '#d9ece9';
     context.shadowColor = context.fillStyle;
@@ -1800,6 +2069,11 @@ function drawRouteMap() {
     context.arc(point.x, point.y, selected ? 7 : 4.5, 0, Math.PI * 2);
     context.fill();
     context.shadowBlur = 0;
+    if (selected) {
+      context.strokeStyle = '#0c3035';
+      context.lineWidth = 2;
+      context.stroke();
+    }
   });
 }
 
@@ -1815,7 +2089,7 @@ function createDestinationButtons() {
       selectedTrain().destinationOverride = station.name;
       updateSwitchDisplay();
       closePanel(dom.mapPanel);
-      showScenicEvent(`Route set · ${station.name}`, `destination-${station.name}-${Date.now()}`);
+      showNotice(station.name, 'ROUTE SET');
     });
     dom.destinationList.appendChild(button);
   });
@@ -1823,7 +2097,8 @@ function createDestinationButtons() {
 
 function openPanel(panel) {
   panel.classList.remove('hidden');
-  if (panel === dom.mapPanel) { state.mapOpen = true; drawRouteMap(); }
+  if (panel === dom.mapPanel) { state.mapOpen = true; sizeRouteMap(); drawRouteMap(); }
+  panel.querySelector('.close-button')?.focus({ preventScroll: true });
   if (panel === dom.settingsPanel) state.settingsOpen = true;
 }
 
@@ -1834,7 +2109,8 @@ function closePanel(panel) {
 }
 
 function updateSwitchDisplay() {
-  dom.switchLabel.textContent = routeNames[state.pendingRoute];
+  dom.switchLabel.textContent = routeNames[state.pendingRoute].replace(' LINE', '');
+  dom.switchButton.title = `Next route at junction: ${routeNames[state.pendingRoute]}`;
   worldGroups.details.traverse((object) => {
     if (object.userData.routeIndex !== undefined && object.geometry?.type === 'BoxGeometry' && object.scale.y > 0) {
       object.material = object.userData.routeIndex === state.pendingRoute ? materials.brass : materials.rail;
@@ -1890,6 +2166,7 @@ function applyQuality(quality) {
   sun.castShadow = profile.shadows;
   camera.far = profile.drawDistance;
   camera.updateProjectionMatrix();
+  applyWeather(state.weather);
 }
 
 function bindInterface() {
@@ -1927,7 +2204,7 @@ function bindInterface() {
   dom.autoButton.addEventListener('click', () => { const train = selectedTrain(); train.auto = !train.auto; dom.autoButton.classList.toggle('active', train.auto); });
   dom.reverseButton.addEventListener('click', () => {
     const train = selectedTrain();
-    if (train.speed > 1.2) { showScenicEvent('Stop the train before reversing', `reverse-warning-${Date.now()}`); return; }
+    if (train.speed > 1.2) { showNotice('Stop the train before reversing'); return; }
     train.direction *= -1;
     dom.reverseButton.querySelector('small').textContent = train.direction > 0 ? 'FORWARD' : 'REVERSE';
   });
@@ -1956,7 +2233,13 @@ function bindInterface() {
     state.dragging = true;
     state.pointerX = event.clientX;
     state.pointerY = event.clientY;
-    if (state.cameraMode !== 4) { state.cameraMode = 4; dom.cameraLabel.textContent = cameraModes[4]; }
+    if (state.cameraMode !== 4) {
+      // Start orbiting from wherever the camera currently is, so grabbing the view never jumps.
+      const offset = camera.position.clone().sub(getPartPose(selectedTrain(), 0).position);
+      state.orbitYaw = Math.atan2(offset.x, offset.z);
+      state.orbitDistance = clamp(Math.hypot(offset.x, offset.z) / Math.max(0.3, Math.cos(state.orbitPitch)), 20, 160);
+      setCameraMode(4);
+    }
     renderer.domElement.setPointerCapture(event.pointerId);
   });
   renderer.domElement.addEventListener('pointermove', (event) => {
@@ -1973,6 +2256,8 @@ function bindInterface() {
 
   window.addEventListener('keydown', (event) => {
     const train = selectedTrain();
+    if (event.code === 'Escape') { closePanel(dom.mapPanel); closePanel(dom.settingsPanel); return; }
+    if (event.target instanceof HTMLSelectElement || state.mapOpen || state.settingsOpen) return;
     if (event.code === 'KeyC') cycleCamera();
     else if (event.code === 'KeyH' && !event.repeat) startHorn();
     else if (event.code === 'KeyW' || event.code === 'ArrowUp') { train.auto = false; train.throttle = clamp(train.throttle + 0.08, 0, 1); }
@@ -1992,6 +2277,7 @@ function bindInterface() {
 
 function resizeRenderer() {
   if (!renderer || !camera) return;
+  if (state.mapOpen) { sizeRouteMap(); drawRouteMap(); }
   camera.aspect = window.innerWidth / Math.max(1, window.innerHeight);
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight, false);
@@ -2011,7 +2297,7 @@ function initializeRenderer() {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   dom.world.appendChild(renderer.domElement);
 
-  hemisphere = new THREE.HemisphereLight(0xfff4d1, 0x665b55, 1.12);
+  hemisphere = new THREE.HemisphereLight(0xfff4d1, 0x8a7a6c, 1.12);
   const painterlyFill = new THREE.AmbientLight(0xffd9b5, 0.28);
   sun = new THREE.DirectionalLight(0xffe0aa, 1.45);
   sun.position.set(-900, 1200, -500);
@@ -2037,6 +2323,7 @@ async function initialize() {
   initializeRenderer();
   createMaterials();
   routes = createRouteDefinitions();
+  buildTrackIndex();
   await yieldFrame();
   setProgress(22, 'Laying three mountain railway lines…');
   createTrackNetwork();
@@ -2062,6 +2349,8 @@ async function initialize() {
   updateSignals();
   updateTimeOfDay(0);
   updateCamera(1);
+  skyDome.position.copy(camera.position);
+  skyDome.scale.setScalar(camera.far * 0.9);
   renderer.render(scene, camera);
   setProgress(100, 'Your train is ready at Grand Cloud Junction.');
   dom.start.disabled = false;
@@ -2069,28 +2358,32 @@ async function initialize() {
 }
 
 function animate() {
-  const rawDelta = Math.min(0.05, clock.getDelta());
+  const frameDelta = clock.getDelta();
+  const rawDelta = Math.min(0.05, frameDelta);
   const delta = state.paused ? 0 : rawDelta;
   state.elapsed += delta;
   if (state.started && delta > 0) {
     trains.forEach((train) => updateTrainPhysics(train, delta));
     if (Math.floor(state.elapsed * 4) !== Math.floor((state.elapsed - delta) * 4)) updateSignals();
-    updateScenicEvents();
+    updateScenicEvents(delta);
   }
   if (cloudInstances) cloudInstances.rotation.y += delta * 0.0015;
   if (aurelion) updateCreatures(delta);
   updateTimeOfDay(delta);
   updateWeather(delta);
   updateCamera(delta || 0.016);
+  skyDome.position.copy(camera.position);
+  skyDome.scale.setScalar(camera.far * 0.9);
   updateAudio();
   updateHUD();
   if (state.mapOpen && state.frames % 8 === 0) drawRouteMap();
   renderer.render(scene, camera);
   state.frames += 1;
-  state.fpsTime += rawDelta;
+  state.fpsFrames += 1;
+  state.fpsTime += frameDelta;
   if (state.fpsTime >= 0.75) {
-    dom.fps.textContent = Math.round((state.frames * 0.75) / state.fpsTime);
-    state.frames = 0;
+    dom.fps.textContent = Math.round(state.fpsFrames / state.fpsTime);
+    state.fpsFrames = 0;
     state.fpsTime = 0;
   }
 }

@@ -6,6 +6,7 @@
     <meta name="theme-color" content="#95d7e5" />
     <meta name="description" content="Cloud Junction — a playable celestial railway journey above the clouds." />
     <title>Cloud Junction — The Celestial Railway</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230d3438'/%3E%3Cpath d='M10 40c6-10 14-12 22-12s16 2 22 12' fill='none' stroke='%23e2b866' stroke-width='4' stroke-linecap='round'/%3E%3Cpath d='M14 46h36' stroke='%23f5e8c7' stroke-width='3' stroke-linecap='round'/%3E%3Ccircle cx='44' cy='20' r='6' fill='%23f5e8c7'/%3E%3C/svg%3E" />
   </head>
   <body>
     <main id="world" aria-label="Cloud Junction 3D world"></main>
@@ -21,7 +22,7 @@
         <div class="loading-track"><i id="progressBar"></i></div>
         <p id="loadingStatus" class="loading-status">Preparing your journey…</p>
         <button id="startButton" class="primary-button" type="button" disabled>
-          <span>BOARD THE CELESTIAL RAILWAY</span><small>Tap to begin · audio starts on boarding</small>
+          <span>BOARD THE CELESTIAL RAILWAY</span><small>Click or tap to begin · audio starts on boarding</small>
         </button>
         <button id="retryButton" class="retry-button hidden" type="button">RETRY JOURNEY</button>
         <p id="startupError" class="startup-error hidden"></p>
@@ -46,7 +47,7 @@
         </nav>
       </header>
 
-      <aside id="eventBanner" class="event-banner glass hidden"><p class="label">SCENIC MOMENT</p><strong id="eventTitle">The Great Sky Bridge</strong></aside>
+      <aside id="eventBanner" class="event-banner glass hidden" aria-live="polite"><p id="eventLabel" class="label">SCENIC MOMENT</p><strong id="eventTitle">The Great Sky Bridge</strong></aside>
 
       <div class="train-switcher glass">
         <button id="previousTrain" type="button" aria-label="Previous train">‹</button>
@@ -63,13 +64,13 @@
           <div class="distance-row"><span id="stationDistance">— km</span><i><b id="routeProgress"></b></i><span id="stationEta">— min</span></div>
         </div>
         <div class="levers">
-          <label class="lever-control"><span><b>POWER</b><em id="powerValue">65%</em></span><input id="powerControl" type="range" min="0" max="100" value="65" /></label>
-          <label class="lever-control brake-control"><span><b>BRAKE</b><em id="brakeValue">0%</em></span><input id="brakeControl" type="range" min="0" max="100" value="0" /></label>
+          <label class="lever-control"><span><b>POWER</b><em id="powerValue">65%</em></span><input id="powerControl" type="range" min="0" max="100" value="65" aria-label="Power" /></label>
+          <label class="lever-control brake-control"><span><b>BRAKE</b><em id="brakeValue">0%</em></span><input id="brakeControl" type="range" min="0" max="100" value="0" aria-label="Brake" /></label>
         </div>
         <div class="drive-buttons">
           <button id="reverseButton" class="console-button" type="button"><span>↕</span><small>FORWARD</small></button>
           <button id="autoButton" class="console-button active" type="button"><span>◈</span><small>AUTO</small></button>
-          <button id="switchButton" class="console-button" type="button"><span>⑂</span><small id="switchLabel">MEADOW LINE</small></button>
+          <button id="switchButton" class="console-button" type="button" aria-label="Choose next route at the junction"><span>⑂</span><small id="switchLabel">MEADOW</small></button>
           <button id="hornButton" class="console-button horn-button" type="button"><span>♬</span><small>HORN</small></button>
         </div>
       </section>
@@ -78,7 +79,7 @@
 
     <section id="mapPanel" class="modal-panel hidden" role="dialog" aria-modal="true" aria-labelledby="mapTitle">
       <div class="panel-shell glass">
-        <header><div><p class="label">CELESTIAL RAILWAY NETWORK</p><h2 id="mapTitle">Journey Map</h2></div><button class="close-button" data-close="mapPanel" type="button">×</button></header>
+        <header><div><p class="label">CELESTIAL RAILWAY NETWORK</p><h2 id="mapTitle">Journey Map</h2></div><button class="close-button" data-close="mapPanel" type="button" aria-label="Close map">×</button></header>
         <div class="map-stage"><canvas id="routeMap" width="900" height="560"></canvas><div class="map-legend"><span class="legend-player">Selected train</span><span class="legend-train">Other trains</span><span class="legend-station">Station</span></div></div>
         <div id="destinationList" class="destination-list"></div>
       </div>
@@ -86,7 +87,7 @@
 
     <section id="settingsPanel" class="modal-panel hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
       <div class="panel-shell settings-shell glass">
-        <header><div><p class="label">JOURNEY OPTIONS</p><h2 id="settingsTitle">Settings</h2></div><button class="close-button" data-close="settingsPanel" type="button">×</button></header>
+        <header><div><p class="label">JOURNEY OPTIONS</p><h2 id="settingsTitle">Settings</h2></div><button class="close-button" data-close="settingsPanel" type="button" aria-label="Close settings">×</button></header>
         <div class="settings-grid">
           <label><span>Graphics quality</span><select id="qualitySelect"><option value="low">Low · fastest</option><option value="medium">Medium</option><option value="high">High · detailed</option></select></label>
           <label><span>Weather</span><select id="weatherSelect"><option value="clear">Clear skies</option><option value="mist">Mountain mist</option><option value="rain">Rain</option><option value="storm">Thunderstorm</option><option value="snow">Snow</option></select></label>
