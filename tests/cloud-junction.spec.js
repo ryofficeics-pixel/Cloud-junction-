@@ -44,9 +44,27 @@ test('desktop journey starts, moves, and every major control responds', async ({
   await page.locator('#cameraButton').click();
   await expect(page.locator('#cameraLabel')).not.toHaveText(originalCamera);
 
+  // Every camera label must fit inside its button; map mode opens the map, which Escape closes.
+  for (let index = 0; index < 8; index += 1) {
+    const fits = await page.locator('#cameraLabel').evaluate((label) => label.scrollWidth <= label.clientWidth + 1);
+    expect(fits, await page.locator('#cameraLabel').innerText()).toBeTruthy();
+    await page.locator('#cameraButton').dispatchEvent('click');
+    if (await page.locator('#mapPanel').isVisible()) {
+      await page.keyboard.press('Escape');
+      await expect(page.locator('#mapPanel')).toBeHidden();
+    }
+  }
+
   await page.locator('#mapButton').click();
   await expect(page.locator('#mapPanel')).toBeVisible();
   expect(await page.locator('#destinationList button').count()).toBeGreaterThanOrEqual(8);
+  const panelBox = await page.locator('#mapPanel .panel-shell').boundingBox();
+  for (const button of await page.locator('#destinationList button').all()) {
+    const box = await button.boundingBox();
+    expect(box.x + box.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1);
+  }
+  const fps = Number(await page.locator('#fpsValue').innerText());
+  expect(fps).toBeGreaterThan(0);
   await page.locator('[data-close="mapPanel"]').click();
   await expect(page.locator('#mapPanel')).toBeHidden();
 
@@ -62,7 +80,7 @@ test('desktop journey starts, moves, and every major control responds', async ({
   await page.locator('#brakeControl').fill('15');
   await expect(page.locator('#operationMode')).toContainText('MANUAL');
   await page.locator('#switchButton').click();
-  await expect(page.locator('#switchLabel')).not.toHaveText('MEADOW LINE');
+  await expect(page.locator('#switchLabel')).not.toHaveText('MEADOW');
   await page.locator('#hornButton').click();
 
   const canvasSize = await page.locator('#world canvas').evaluate((canvas) => ({ width: canvas.width, height: canvas.height }));
