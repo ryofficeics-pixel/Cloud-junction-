@@ -41,7 +41,9 @@ Touch controls expose the same functions on mobile. Graphics automatically defau
 ## Railway systems
 
 - Six active multi-car trains with separate locomotive and carriage placement
-- Three long continuous routes with a working junction route choice
+- Grand Cloud Junction is a through station: one straight main line under the train shed, a second platform road with a parked train, and turnouts in each throat where the three routes diverge and rejoin
+- Three long routes whose loops nest in plan, so no two lines cross at grade; track is level across the hub and every station island
+- In development (`npm run dev`) a railway clearance audit warns in the console if any line cuts through an island or meets another line
 - Simplified block occupancy, signal aspects, collision spacing, station stops, acceleration, braking, grades, and curve speed limits
 - Eight camera modes, live network map, destination selection, day/night cycle, five weather modes, and procedural Web Audio
 - Procedural floating islands, settlements, region stations, layered cloud ocean, instanced vegetation, bridges, waterfalls, and original sky creatures

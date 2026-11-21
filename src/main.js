@@ -127,27 +127,63 @@ function createMaterials() {
   });
 }
 
+// Grand Cloud Junction is a through station on a straight east–west main line at HUB_TRACK_Y.
+// Every route leaves the east throat and re-enters the west throat on that same line, so trains
+// switch routes through turnouts outside the platforms. In plan the loops nest (Crown outside
+// Meadow in the north, Tempest in the south), so no two lines ever cross at grade.
+const HUB_TRACK_Y = 338;
+const HUB_GROUND_Y = 335.6;
+
+// [routeIndex, u, radius, biome, houses, trees, landmark, lateral]
+const islandDefinitions = [
+  [0, 0.26, 96, 'meadow', 3, 20, 'SUNSET ORCHARD', 11], [0, 0.49, 125, 'garden', 4, 26, 'FOLDED GARDENS', -12],
+  [0, 0.73, 105, 'mango', 4, 17, 'MANGO TIDE', 12], [1, 0.19, 125, 'meadow', 5, 22, 'CLOUD HARBOR', 14],
+  [1, 0.43, 120, 'pine', 2, 34, 'PINEWATCH', 12], [1, 0.65, 170, 'frost', 4, 36, 'FROST CROWN', -15],
+  [2, 0.5, 125, 'storm', 2, 18, 'THUNDER PASS', 14], [2, 0.77, 145, 'meadow', 3, 20, 'CELESTIAL GATE', -14],
+];
+
+function levelRouteAtStations(points, routeIndex) {
+  // Lay the railway flat across every station island and the hub, easing grades in over 260 m,
+  // so no part of a station's track can dip below the island's grass.
+  const rough = new THREE.CatmullRomCurve3(points, false, 'centripetal');
+  const length = rough.getLength();
+  const flats = islandDefinitions.filter(([index]) => index === routeIndex).map(([, u, radius]) => ({ at: u * length, half: radius * 1.2 + 25, y: rough.getPointAt(u).y }));
+  flats.push({ at: 0, half: 420, y: HUB_TRACK_Y }, { at: length, half: 420, y: HUB_TRACK_Y });
+  const count = Math.ceil(length / 10);
+  const samples = [];
+  for (let index = 0; index <= count; index += 1) {
+    const point = rough.getPointAt(index / count);
+    const distance = (index / count) * length;
+    flats.forEach((flat) => { point.y = lerp(point.y, flat.y, 1 - smoothstep(flat.half, flat.half + 260, Math.abs(distance - flat.at))); });
+    samples.push(point);
+  }
+  return new THREE.CatmullRomCurve3(samples, false, 'centripetal');
+}
+
 function createRouteDefinitions() {
-  const hub = new THREE.Vector3(0, 338, 0);
+  const v = (x, y, z) => new THREE.Vector3(x, y, z);
+  const y = HUB_TRACK_Y;
+  const eastTrunk = [v(0, y, 0), v(120, y, 0), v(240, y, 0)];
+  const westTrunk = [v(-240, y, 0), v(-120, y, 0), v(0, y, 0)];
   const definitions = [
     {
       name: routeNames[0], color: '#e7c26d', station: 'Sunset Orchard', regions: ['Grand Cloud Junction', 'Sunlit Meadow Isles', 'Folded Gardens', 'Mango Tide'],
-      points: [hub, new THREE.Vector3(-360, 315, 210), new THREE.Vector3(-820, 275, 610), new THREE.Vector3(-1290, 225, 510), new THREE.Vector3(-1500, 185, 20), new THREE.Vector3(-1320, 210, -540), new THREE.Vector3(-850, 270, -900), new THREE.Vector3(-280, 350, -1040), new THREE.Vector3(350, 405, -830), new THREE.Vector3(650, 382, -380), hub.clone()],
-      landmarks: [{ u: 0.23, name: 'Sunset Orchard' }, { u: 0.49, name: 'Folded Gardens' }, { u: 0.73, name: 'Mango Tide' }],
+      points: [...eastTrunk, v(420, 337, 8), v(650, 322, 90), v(860, 296, 330), v(860, 266, 700), v(560, 240, 990), v(0, 222, 1090), v(-540, 238, 990), v(-820, 262, 700), v(-830, 292, 360), v(-610, 324, 70), v(-400, 337, 6), ...westTrunk],
+      landmarks: [{ u: 0.26, name: 'Sunset Orchard' }, { u: 0.49, name: 'Folded Gardens' }, { u: 0.73, name: 'Mango Tide' }],
     },
     {
       name: routeNames[1], color: '#9ad6da', station: 'Frost Crown', regions: ['Grand Cloud Junction', 'Cloud Harbor', 'Whispering Pines', 'Frost Crown', 'Celestial Heights'],
-      points: [hub, new THREE.Vector3(260, 375, 260), new THREE.Vector3(610, 445, 610), new THREE.Vector3(960, 555, 870), new THREE.Vector3(1280, 690, 600), new THREE.Vector3(1390, 780, 90), new THREE.Vector3(1160, 735, -440), new THREE.Vector3(720, 640, -700), new THREE.Vector3(320, 500, -440), hub.clone()],
-      landmarks: [{ u: 0.18, name: 'Cloud Harbor' }, { u: 0.43, name: 'Pinewatch' }, { u: 0.65, name: 'Frost Crown' }],
+      points: [...eastTrunk, v(420, 339, 30), v(760, 372, 160), v(1150, 455, 470), v(1380, 585, 930), v(1150, 720, 1400), v(520, 785, 1600), v(-200, 735, 1520), v(-820, 620, 1280), v(-1220, 500, 860), v(-1100, 420, 450), v(-740, 358, 180), v(-440, 340, 38), ...westTrunk],
+      landmarks: [{ u: 0.19, name: 'Cloud Harbor' }, { u: 0.43, name: 'Pinewatch' }, { u: 0.65, name: 'Frost Crown' }],
     },
     {
       name: routeNames[2], color: '#cc8f86', station: 'Thunder Pass', regions: ['Grand Cloud Junction', 'Cloud Harbor', 'Thunder Pass', 'Celestial Heights'],
-      points: [hub, new THREE.Vector3(230, 325, -270), new THREE.Vector3(580, 300, -680), new THREE.Vector3(930, 270, -1100), new THREE.Vector3(1330, 340, -940), new THREE.Vector3(1550, 440, -440), new THREE.Vector3(1370, 485, 180), new THREE.Vector3(900, 415, 390), new THREE.Vector3(430, 365, 190), hub.clone()],
+      points: [...eastTrunk, v(420, 338, -28), v(680, 330, -210), v(980, 302, -520), v(1320, 330, -880), v(1260, 420, -1280), v(700, 470, -1440), v(0, 440, -1380), v(-660, 400, -1180), v(-1080, 362, -770), v(-1020, 346, -360), v(-680, 339, -110), v(-420, 338, -28), ...westTrunk],
       landmarks: [{ u: 0.27, name: 'Cloud Harbor' }, { u: 0.5, name: 'Thunder Pass' }, { u: 0.77, name: 'Celestial Gate' }],
     },
   ];
   return definitions.map((definition, index) => {
-    const curve = new THREE.CatmullRomCurve3(definition.points, false, 'catmullrom', 0.32);
+    const curve = levelRouteAtStations(definition.points, index);
     return { ...definition, index, curve, length: curve.getLength() };
   });
 }
@@ -216,6 +252,14 @@ function buildTrackIndex() {
       if (!trackIndex.buckets.has(key)) trackIndex.buckets.set(key, []);
       trackIndex.buckets.get(key).push(point);
     }
+  });
+}
+
+function addTrackIndexPoints(points) {
+  points.forEach((point) => {
+    const key = `${Math.floor(point.x / trackIndex.cell)},${Math.floor(point.z / trackIndex.cell)}`;
+    if (!trackIndex.buckets.has(key)) trackIndex.buckets.set(key, []);
+    trackIndex.buckets.get(key).push(point);
   });
 }
 
@@ -622,10 +666,41 @@ function islandPlacement(position, radius, minimumRadius, maximumRadius, clearan
   return null;
 }
 
+const islandRecords = [];
+
+// Development guard: report any railway that cuts through an island or runs into another line at grade.
+function auditRailwayClearance() {
+  const problems = [];
+  const samples = routes.map((route) => {
+    const count = Math.ceil(route.length / 6);
+    return Array.from({ length: count + 1 }, (_, index) => ({ u: index / count, point: route.curve.getPointAt(index / count) }));
+  });
+  samples.forEach((list, routeIndex) => list.forEach(({ u, point }) => {
+    islandRecords.forEach((island) => {
+      const horizontal = Math.hypot(point.x - island.x, point.z - island.z);
+      if (horizontal > island.radius * 1.06) return;
+      const above = point.y - island.y;
+      if (above < 1.8 && above > -island.depth) problems.push(`route ${routeIndex} u=${u.toFixed(3)} is ${above.toFixed(1)} m vs island ${island.landmark || `@${Math.round(island.x)},${Math.round(island.z)}`}`);
+    });
+  }));
+  for (let a = 0; a < routes.length; a += 1) {
+    for (let b = a + 1; b < routes.length; b += 1) {
+      samples[a].forEach(({ u, point }) => {
+        if (point.distanceTo(new THREE.Vector3(0, HUB_TRACK_Y, 0)) < 430) return; // shared main line and throats
+        samples[b].forEach(({ point: other }) => {
+          if (Math.hypot(point.x - other.x, point.z - other.z) < 14 && Math.abs(point.y - other.y) < 16) problems.push(`routes ${a}/${b} meet near u=${u.toFixed(3)}`);
+        });
+      });
+    }
+  }
+  return problems;
+}
+
 function createFloatingIsland(options) {
   const { position, radius = 70, depth = radius * 0.9, biome = 'meadow', houses = 1, trees = 10, landmark = '' } = options;
   const group = new THREE.Group();
   group.position.copy(position);
+  islandRecords.push({ x: position.x, y: position.y, z: position.z, radius, depth, landmark });
   const rockMaterial = biome === 'frost' ? materials.rockCold : biome === 'mango' ? materials.rockWarm : materials.rock;
   const grassMaterial = biome === 'frost' ? materials.frostGrass : biome === 'mango' ? materials.mangoGrass : biome === 'storm' ? materials.stormGrass : biome === 'garden' ? materials.gardenGrass : materials.grass;
   const rock = new THREE.Mesh(createIslandGeometry(radius, depth, radius > 200 ? 28 : radius > 110 ? 20 : 15), [rockMaterial, grassMaterial]);
@@ -785,9 +860,9 @@ function createStation(routeIndex, u, name, size = 'small', biome = 'meadow') {
   building.rotation.y = Math.PI / 2;
   station.add(building);
   if (size === 'grand') {
-    // Glass train shed spanning platform and track: columns plus arched brass ribs across the rails.
-    const shedCenter = 4;
-    const shedHalfWidth = 22;
+    // Glass train shed spanning both platforms and both platform tracks.
+    const shedCenter = 14;
+    const shedHalfWidth = 31;
     const canopy = new THREE.Mesh(new THREE.CylinderGeometry(shedHalfWidth, shedHalfWidth, 108, 18, 1, true, -Math.PI / 2, Math.PI), materials.glass);
     canopy.rotation.x = -Math.PI / 2;
     canopy.scale.set(1, 1, 0.42);
@@ -817,7 +892,7 @@ function createStation(routeIndex, u, name, size = 'small', biome = 'meadow') {
     clockRim.position.copy(clockFace.position);
     station.add(tower, towerRoof, clockFace, clockRim);
   }
-  station.add(createLabelSprite(name, size === 'grand' ? 42 : 24, new THREE.Vector3(size === 'grand' ? -8 : -6, size === 'grand' ? 30 : 15, -platformLength * 0.3)));
+  station.add(createLabelSprite(name, size === 'grand' ? 42 : 24, new THREE.Vector3(size === 'grand' ? -8 : -6, size === 'grand' ? 36 : 15, -platformLength * 0.3)));
   station.position.copy(position).addScaledVector(side, platformOffset).add(new THREE.Vector3(0, -1.15, 0));
   station.rotation.y = Math.atan2(tangent.x, tangent.z);
   station.traverse((child) => { if (child.isMesh) { child.castShadow = state.quality !== 'low'; child.receiveShadow = true; } });
@@ -829,32 +904,91 @@ function createStation(routeIndex, u, name, size = 'small', biome = 'meadow') {
     const towerWorld = station.localToWorld(new THREE.Vector3(-40, 0, -34));
     registerOccluder(towerWorld.x, towerWorld.z, 11, towerWorld.y, towerWorld.y + 76);
   }
+  // Keep houses and trees off the platforms, forecourt and (for the hub) the second platform road.
+  const keepOutColumns = size === 'grand' ? [-34, -18, 0, 18, 30, 40] : [-15, 0];
+  const keepOut = [];
+  keepOutColumns.forEach((x) => {
+    for (let z = -platformLength * 0.6; z <= platformLength * 0.6; z += 12) keepOut.push(station.localToWorld(new THREE.Vector3(x, 1.15, z)));
+  });
+  addTrackIndexPoints(keepOut);
+  if (size === 'grand') createHubPlatformRoad();
   const record = { routeIndex, u, name, position: position.clone(), biome };
   stations.push(record);
   return record;
 }
 
+// Second platform road at Grand Cloud Junction: a loop that leaves the main line through a
+// turnout at each throat, runs beside an island platform, and holds a parked train.
+function createHubPlatformRoad() {
+  const y = HUB_TRACK_Y;
+  const lateral = -11;
+  const curve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(-215, y, 0), new THREE.Vector3(-170, y, -1.6), new THREE.Vector3(-125, y, lateral + 1.2), new THREE.Vector3(-95, y, lateral),
+    new THREE.Vector3(95, y, lateral), new THREE.Vector3(125, y, lateral + 1.2), new THREE.Vector3(170, y, -1.6), new THREE.Vector3(215, y, 0),
+  ], false, 'centripetal');
+  const length = curve.getLength();
+  const up = new THREE.Vector3(0, 1, 0);
+  const segments = 120;
+  [-2.05, 2.05].forEach((offset) => {
+    const points = curve.getSpacedPoints(segments).map((point, index) => {
+      const tangent = curve.getTangentAt(index / segments);
+      return point.clone().addScaledVector(new THREE.Vector3().crossVectors(up, tangent).normalize(), offset);
+    });
+    worldGroups.tracks.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), segments, 0.23, 5, false), materials.railTop));
+  });
+  const sleeperCount = Math.ceil(length / 6.3);
+  const sleepers = new THREE.InstancedMesh(new THREE.BoxGeometry(6.4, 0.38, 0.72), materials.sleeper, sleeperCount);
+  const ballast = new THREE.InstancedMesh(new THREE.BoxGeometry(6.9, 1.6, 6.6), materials.ballast, sleeperCount);
+  const dummy = new THREE.Object3D();
+  for (let index = 0; index < sleeperCount; index += 1) {
+    const t = index / (sleeperCount - 1);
+    const point = curve.getPointAt(t);
+    const tangent = curve.getTangentAt(t);
+    dummy.position.copy(point).add(new THREE.Vector3(0, -0.3, 0));
+    dummy.rotation.set(0, Math.atan2(tangent.x, tangent.z), 0);
+    dummy.updateMatrix();
+    sleepers.setMatrixAt(index, dummy.matrix);
+    dummy.position.y = point.y - 1.15;
+    dummy.updateMatrix();
+    ballast.setMatrixAt(index, dummy.matrix);
+  }
+  sleepers.receiveShadow = true;
+  ballast.receiveShadow = true;
+  worldGroups.tracks.add(sleepers, ballast);
+  addTrackIndexPoints(curve.getSpacedPoints(60));
+
+  const islandPlatform = new THREE.Mesh(new THREE.BoxGeometry(150, 1.3, 9), materials.paleStone);
+  islandPlatform.position.set(0, y - 0.42, lateral - 8.6);
+  islandPlatform.receiveShadow = true;
+  worldGroups.buildings.add(islandPlatform);
+  [-45, 0, 45].forEach((x) => {
+    const bench = new THREE.Mesh(new THREE.BoxGeometry(5, 0.9, 1.2), materials.darkWood);
+    bench.position.set(x, y + 0.7, lateral - 10.5);
+    worldGroups.buildings.add(bench);
+  });
+
+  const parkedConfig = { type: 'streamline', color: 'teal', accent: 'brass', cars: 2 };
+  const parked = [createLocomotive(parkedConfig), createPassengerCar(parkedConfig, 0), createPassengerCar(parkedConfig, 1)];
+  parked.forEach((part, index) => {
+    part.position.set(42 - (index === 0 ? 0 : 16.2 + (index - 1) * 14.8), y + 0.26, lateral);
+    part.rotation.y = -Math.PI / 2;
+    worldGroups.world.add(part);
+  });
+}
+
 function createWorldRegions() {
   const stationDefinitions = [
-    [0, 0.008, 'Grand Cloud Junction', 'grand', 'meadow'], [0, 0.23, 'Sunset Orchard', 'small', 'meadow'],
+    [0, 0, 'Grand Cloud Junction', 'grand', 'meadow'], [0, 0.26, 'Sunset Orchard', 'small', 'meadow'],
     [0, 0.49, 'Folded Gardens', 'small', 'garden'], [0, 0.73, 'Mango Tide', 'small', 'mango'],
-    [1, 0.18, 'Cloud Harbor', 'small', 'meadow'], [1, 0.43, 'Pinewatch', 'small', 'pine'],
+    [1, 0.19, 'Cloud Harbor', 'small', 'meadow'], [1, 0.43, 'Pinewatch', 'small', 'pine'],
     [1, 0.65, 'Frost Crown', 'small', 'frost'], [2, 0.5, 'Thunder Pass', 'small', 'storm'],
     [2, 0.77, 'Celestial Gate', 'small', 'meadow'],
   ];
-  const junctionBeds = [
-    [0, 0.978, '', 'grand'], [1, 0.978, '', 'grand'], [2, 0.978, '', 'grand'],
-    [1, 0.012, '', 'grand'], [2, 0.012, '', 'grand'],
-  ];
+  // Ballast across the hub: the shared main line plus each route's throat out to the island edge.
+  const junctionBeds = routes.flatMap((route) => [[route.index, 150 / route.length, '', 'grand'], [route.index, 1 - 150 / route.length, '', 'grand']]);
   createLandTrackBeds([...stationDefinitions, ...junctionBeds]);
   stationDefinitions.forEach((definition) => createStation(...definition));
 
-  const islandDefinitions = [
-    [0, 0.23, 96, 'meadow', 3, 20, 'SUNSET ORCHARD', 11], [0, 0.49, 125, 'garden', 4, 26, 'FOLDED GARDENS', -12],
-    [0, 0.73, 105, 'mango', 4, 17, 'MANGO TIDE', 12], [1, 0.18, 135, 'meadow', 5, 22, 'CLOUD HARBOR', -12],
-    [1, 0.43, 120, 'pine', 2, 34, 'PINEWATCH', 12], [1, 0.65, 170, 'frost', 4, 36, 'FROST CROWN', -15],
-    [2, 0.5, 125, 'storm', 2, 18, 'THUNDER PASS', 14], [2, 0.77, 145, 'meadow', 3, 20, 'CELESTIAL GATE', -14],
-  ];
   islandDefinitions.forEach(([routeIndex, u, radius, biome, houses, trees, landmark, lateral]) => {
     const pose = poseOnRoute(routeIndex, u, lateral, -4.2);
     createFloatingIsland({ position: pose.position, radius, depth: radius * range(0.75, 1.25), biome, houses, trees, landmark });
@@ -863,17 +997,25 @@ function createWorldRegions() {
 
   const farCount = qualityProfiles[state.quality].farIslands;
   for (let index = 0; index < farCount; index += 1) {
-    const angle = range(0, Math.PI * 2);
-    const distance = range(700, 2500);
     const radius = range(26, 78);
+    const depth = radius * range(0.75, 1.4);
+    let position = null;
+    for (let attempt = 0; attempt < 30 && !position; attempt += 1) {
+      const angle = range(0, Math.PI * 2);
+      const distance = range(700, 2500);
+      const candidate = new THREE.Vector3(Math.cos(angle) * distance, range(180, 670), Math.sin(angle) * distance);
+      const clear = horizontalTrackDistance(candidate.x, candidate.y - depth * 0.4, candidate.z, depth * 0.6 + 70, radius + 90) > radius + 60;
+      if (clear) position = candidate;
+    }
+    if (!position) continue;
     const biomeOptions = ['meadow', 'garden', 'mango', 'pine'];
     createFloatingIsland({
-      position: new THREE.Vector3(Math.cos(angle) * distance, range(180, 670), Math.sin(angle) * distance), radius,
-      depth: radius * range(0.75, 1.4), biome: biomeOptions[index % biomeOptions.length], houses: random() > 0.55 ? 1 : 0,
+      position, radius,
+      depth, biome: biomeOptions[index % biomeOptions.length], houses: random() > 0.55 ? 1 : 0,
       trees: Math.floor(range(2, 10)),
     });
   }
-  createFloatingIsland({ position: new THREE.Vector3(0, 332, 0), radius: 265, depth: 205, biome: 'meadow', houses: 10, trees: 44 });
+  createFloatingIsland({ position: new THREE.Vector3(0, HUB_GROUND_Y - 0.2, 0), radius: 265, depth: 205, biome: 'meadow', houses: 10, trees: 44 });
   createGrandSkyCity();
   createVegetationInstances();
   createWindmillsAndObservatories();
@@ -908,7 +1050,7 @@ function createCityTower(x, z, height, width, roofMaterial, tier = 0) {
     chimney.position.set(width * 0.36, height * 1.08, -width * 0.18);
     tower.add(chimney);
   }
-  tower.position.set(x, 332.5, z);
+  tower.position.set(x, HUB_GROUND_Y, z);
   tower.traverse((child) => { if (child.isMesh) { child.castShadow = state.quality !== 'low'; child.receiveShadow = true; } });
   worldGroups.buildings.add(tower);
   return tower;
@@ -983,7 +1125,7 @@ function findClearCitySpot(x, z, width) {
     const radius = Math.min(232, baseRadius + Math.floor(step / 8) * 18);
     const candidateX = Math.cos(angle) * radius;
     const candidateZ = Math.sin(angle) * radius;
-    const trackClear = horizontalTrackDistance(candidateX, 338, candidateZ, 70, 120) > width + 34;
+    const trackClear = horizontalTrackDistance(candidateX, HUB_TRACK_Y, candidateZ, 70, 120) > width + 34;
     const buildingClear = cameraOccluders.every((occluder) => Math.hypot(occluder.x - candidateX, occluder.z - candidateZ) > occluder.radius + width + 4);
     if (trackClear && buildingClear) return { x: candidateX, z: candidateZ };
   }
@@ -1001,7 +1143,7 @@ function createGrandSkyCity() {
     const spot = findClearCitySpot(x, z, width);
     if (!spot) return;
     createCityTower(spot.x, spot.z, height, width, index % 3 === 0 ? materials.terracotta : index % 3 === 1 ? materials.teal : materials.copper, index);
-    registerOccluder(spot.x, spot.z, width + 3, 332, 332 + height * 1.12);
+    registerOccluder(spot.x, spot.z, width + 3, HUB_GROUND_Y, HUB_GROUND_Y + height * 1.12);
   });
 
   const bridgeCurve = new THREE.CatmullRomCurve3([
@@ -1018,7 +1160,7 @@ function createGrandSkyCity() {
 }
 
 function createWindmillsAndObservatories() {
-  const locations = [poseOnRoute(0, 0.23, 75, 14), poseOnRoute(0, 0.73, -70, 18)];
+  const locations = [poseOnRoute(0, 0.26, 62, -3.6), poseOnRoute(0, 0.73, -58, -3.6)];
   locations.forEach(({ position }) => {
     const windmill = new THREE.Group();
     const tower = new THREE.Mesh(new THREE.CylinderGeometry(4.4, 7.2, 26, 8), materials.plaster);
@@ -1042,7 +1184,7 @@ function createWindmillsAndObservatories() {
     worldGroups.details.add(windmill);
     registerOccluder(position.x, position.z, 9, position.y, position.y + 36);
   });
-  const observatoryPosition = poseOnRoute(2, 0.77, -65, 15).position;
+  const observatoryPosition = poseOnRoute(2, 0.77, -62, -3.6).position;
   const observatory = new THREE.Group();
   const base = new THREE.Mesh(new THREE.CylinderGeometry(13, 16, 21, 16), materials.plaster);
   base.position.y = 10.5;
@@ -1961,9 +2103,14 @@ function updateCreatures(delta) {
 const mapView = { width: 900, height: 560 };
 
 function mapCoordinates(vector) {
-  // Network spans roughly x −1500…1550 and z −1100…870; fit it with margin for labels.
-  const scale = Math.min((mapView.width * 0.86) / 3100, (mapView.height * 0.8) / 2000);
-  return { x: mapView.width * 0.5 + (vector.x - 25) * scale, y: mapView.height * 0.5 + (vector.z + 115) * scale };
+  if (!mapView.bounds) {
+    const box = new THREE.Box3();
+    routes.forEach((route) => route.curve.getSpacedPoints(200).forEach((point) => box.expandByPoint(point)));
+    mapView.bounds = box;
+  }
+  const { min, max } = mapView.bounds;
+  const scale = Math.min((mapView.width * 0.86) / (max.x - min.x), (mapView.height * 0.84) / (max.z - min.z));
+  return { x: mapView.width * 0.5 + (vector.x - (min.x + max.x) / 2) * scale, y: mapView.height * 0.5 + (vector.z - (min.z + max.z) / 2) * scale };
 }
 
 function sizeRouteMap() {
@@ -2366,6 +2513,12 @@ async function initialize() {
   setProgress(100, 'Your train is ready at Grand Cloud Junction.');
   dom.start.disabled = false;
   renderer.setAnimationLoop(animate);
+  if (import.meta.env.DEV) {
+    const problems = auditRailwayClearance();
+    window.__CJ_RAIL_AUDIT__ = problems;
+    window.__CJ_DEBUG__ = { trains, stations, state };
+    if (problems.length) console.warn(`Railway clearance: ${problems.length} problems`, problems.slice(0, 20));
+  }
 }
 
 function animate() {
