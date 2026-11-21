@@ -24,7 +24,7 @@ const weakDevice = (navigator.hardwareConcurrency && navigator.hardwareConcurren
 const initialQuality = isMobile ? (weakDevice ? 'low' : 'medium') : 'high';
 const qualityProfiles = {
   low: { pixelRatio: 1, shadows: false, shadowSize: 512, cloudLobes: 130, farIslands: 9, treeLimit: 220, trackSegments: 360, weatherParticles: 260, drawDistance: 5200 },
-  medium: { pixelRatio: 1.3, shadows: true, shadowSize: 1024, cloudLobes: 240, farIslands: 15, treeLimit: 420, trackSegments: 520, weatherParticles: 520, drawDistance: 6200 },
+  medium: { pixelRatio: 1.3, shadows: true, shadowSize: 768, cloudLobes: 240, farIslands: 15, treeLimit: 420, trackSegments: 520, weatherParticles: 520, drawDistance: 6200 },
   high: { pixelRatio: 1.65, shadows: true, shadowSize: 2048, cloudLobes: 390, farIslands: 24, treeLimit: 720, trackSegments: 720, weatherParticles: 850, drawDistance: 7200 },
 };
 
@@ -481,8 +481,19 @@ function createSkyAndAtmosphere() {
 
 function createCloudBanks() {
   const count = qualityProfiles[state.quality].cloudLobes;
-  const geometry = new THREE.IcosahedronGeometry(1, state.quality === 'low' ? 1 : 2);
-  const cloudMaterial = new THREE.MeshLambertMaterial({ color: 0xfff6ea, emissive: 0xffe2c4, emissiveIntensity: 0.42 });
+  const geometry = new THREE.IcosahedronGeometry(1, state.quality === 'high' ? 2 : 1);
+  // Painterly vertical gradient: bright crowns, cool lavender bellies (tinted further by time of day).
+  const positions = geometry.attributes.position;
+  const colors = new Float32Array(positions.count * 3);
+  const crown = new THREE.Color(0xffffff);
+  const belly = new THREE.Color(0xb9aac4);
+  const mixed = new THREE.Color();
+  for (let index = 0; index < positions.count; index += 1) {
+    mixed.copy(belly).lerp(crown, smoothstep(-0.7, 0.55, positions.getY(index)));
+    colors.set([mixed.r, mixed.g, mixed.b], index * 3);
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  const cloudMaterial = new THREE.MeshLambertMaterial({ color: 0xfff6ea, emissive: 0xffe2c4, emissiveIntensity: 1, vertexColors: true });
   cloudInstances = new THREE.InstancedMesh(geometry, cloudMaterial, count);
   const dummy = new THREE.Object3D();
   const clusterCenters = [];
@@ -1575,8 +1586,8 @@ function updateTimeOfDay(delta) {
   cloudOcean.material.uniforms.color.value.copy(palette.bottom).lerp(new THREE.Color(0xffffff), 0.62);
   cloudOcean.material.uniforms.opacity.value = state.timeOfDay > 0.8 || state.timeOfDay < 0.16 ? 0.45 : 0.78;
   if (cloudInstances) {
-    cloudInstances.material.color.set(0xffffff).lerp(palette.horizon, 0.18);
-    cloudInstances.material.emissive.copy(palette.horizon).lerp(palette.sun, 0.5).multiplyScalar(0.34 + palette.intensity * 0.16);
+    cloudInstances.material.color.set(0xffffff).lerp(palette.sun, 0.22);
+    cloudInstances.material.emissive.copy(palette.horizon).lerp(palette.top, 0.15).multiplyScalar(0.36 + palette.intensity * 0.1);
   }
 }
 

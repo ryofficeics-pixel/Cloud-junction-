@@ -73,7 +73,7 @@ button { color: inherit; }
 .drive-console { position: absolute; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); display: grid; grid-template-columns: 115px minmax(190px, 290px) minmax(250px, 360px) auto; gap: 18px; align-items: center; width: min(1000px, calc(100vw - 390px)); min-height: 105px; padding: 13px 14px 13px 18px; border-radius: 18px; pointer-events: auto; transform: translateX(-50%); }
 .speed-cluster>div { display: flex; align-items: baseline; gap: 5px; }
 .speed-cluster b { font: 600 38px/.8 Georgia, 'Times New Roman', serif; }
-.speed-cluster b { min-width: 2ch; font-variant-numeric: tabular-nums; }
+.speed-cluster b { font-variant-numeric: tabular-nums; }
 .speed-cluster span { font-size: 9px; opacity: .6; }
 .mode-pill { display: inline-block; margin: 8px 0 0; padding: 4px 7px; border: 1px solid rgba(125,215,175,.4); border-radius: 999px; color: #b9f0cf; font-size: 8px; font-weight: 700; letter-spacing: .1em; white-space: nowrap; }
 .destination-cluster strong { display: block; overflow: hidden; font: 600 17px/1.1 Georgia, 'Times New Roman', serif; white-space: nowrap; text-overflow: ellipsis; }
@@ -121,15 +121,15 @@ button { color: inherit; }
 .fatal-error p { font-size: 12px; line-height: 1.5; }
 .fatal-error button { padding: 10px 18px; border: 1px solid #fff8; border-radius: 8px; background: #3f1d1c; }
 
-@media (max-width: 1050px) {
+@media (max-width: 1320px) {
   .journey-card { min-width: 490px; }
 .drive-console { left: auto; right: 16px; grid-template-columns: 100px minmax(150px,1fr) minmax(190px,270px) auto; width: calc(100vw - 210px); transform: none; }
 .desktop-hint { display: none; }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .topbar { top: max(8px, env(safe-area-inset-top)); left: 8px; right: 8px; }
-.journey-card { min-width: 0; width: calc(100vw - 174px); min-height: 58px; padding: 9px 11px; }
+.journey-card { min-width: 0; width: calc(100vw - 174px); overflow: hidden; min-height: 58px; padding: 9px 11px; }
 .journey-card h2 { max-width: 43vw; overflow: hidden; font-size: 18px; white-space: nowrap; text-overflow: ellipsis; }
 .journey-card .label { margin-bottom: 3px; font-size: 8px; }
 .journey-meta { gap: 8px; }
@@ -142,9 +142,9 @@ button { color: inherit; }
   .event-banner { top: 73px; padding: 9px 16px; }
 .event-banner strong { font-size: 15px; }
 .event-banner .label { font-size: 8px; }
-  .train-switcher { left: 8px; bottom: calc(max(8px, env(safe-area-inset-bottom)) + 132px); grid-template-columns: 34px 60px 34px; height: 42px; border-radius: 11px; }
+  .train-switcher { left: 8px; bottom: calc(max(8px, env(safe-area-inset-bottom)) + 172px); grid-template-columns: 34px 60px 34px; height: 42px; border-radius: 11px; }
 .train-switcher b { font-size: 9px; }
-  .drive-console { left: 8px; right: 8px; bottom: max(8px, env(safe-area-inset-bottom)); display: grid; grid-template-columns: 76px 1fr auto; grid-template-rows: 55px 58px; gap: 6px 9px; width: auto; min-height: 122px; padding: 9px 9px 8px; border-radius: 15px; transform: none; }
+  .drive-console { left: 8px; right: 8px; bottom: max(8px, env(safe-area-inset-bottom)); display: grid; grid-template-columns: 76px 1fr auto; grid-template-rows: auto auto; gap: 6px 9px; width: auto; min-height: 122px; padding: 9px 9px 8px; border-radius: 15px; transform: none; }
 .speed-cluster { grid-row: 1; grid-column: 1; }
 .speed-cluster .label { margin-bottom: 4px; font-size: 8px; }
 .speed-cluster b { font-size: 31px; }
@@ -173,10 +173,15 @@ button { color: inherit; }
 .settings-grid select { min-width: 145px; max-width: 50vw; }
 }
 
+@media (max-width: 400px) {
+  .journey-meta { display: none; }
+  .journey-card h2 { max-width: none; }
+}
+
 @media (max-height: 500px) and (orientation: landscape) {
   .journey-card { width: 250px; }
 .journey-meta { display: none; }
-.drive-console { left: auto; right: 8px; bottom: 8px; grid-template-columns: 65px 130px 170px auto; grid-template-rows: 58px; width: auto; min-height: 74px; }
+.drive-console { left: auto; right: 8px; bottom: 8px; grid-template-columns: 60px 110px 150px auto; grid-template-rows: 58px; width: auto; min-height: 74px; }
 .speed-cluster, .destination-cluster, .levers, .drive-buttons { grid-row: 1; grid-column: auto; }
 .train-switcher { bottom: 8px; }
 .brand-lockup { padding: 12px; }
